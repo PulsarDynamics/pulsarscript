@@ -1,0 +1,8 @@
+var x = 10;
+print(x);
+var greeting = "Hello from REPL test!";
+print(greeting);
+function double(n) { return n * 2; }
+print(double(21));
+for (var i = 0; i < 3; i = i + 1) { print(i); }
+print(concat("Result: ", double(x)));

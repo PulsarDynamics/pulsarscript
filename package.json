@@ -1,0 +1,17 @@
+{
+  "name": "pulsarscript",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "repl": "bun run repl.ts",
+    "test": "bun run index.ts",
+    "test-errors": "bun run test-errors.ts",
+    "test-repl": "type test-repl.poo | bun repl.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
