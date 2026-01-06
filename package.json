@@ -6,7 +6,8 @@
     "repl": "bun run repl.ts",
     "test": "bun run index.ts",
     "test-errors": "bun run test-errors.ts",
-    "test-repl": "type test-repl.poo | bun repl.ts"
+    "test-repl": "type test-repl.poo | bun repl.ts",
+    "compile": "bun run compile.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

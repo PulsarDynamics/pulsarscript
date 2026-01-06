@@ -5,6 +5,7 @@ import type { FunctionStmt } from "../classes/FunctionStmt";
 import type { IfStmt } from "../classes/IfStmt";
 import type { PrintStmt } from "../classes/PrintStmt";
 import type { ReturnStmt } from "../classes/ReturnStmt";
+import type { TryCatchStmt } from "../classes/TryCatchStmt";
 import type { VarStmt } from "../classes/VarStmt";
 import type { WhileStmt } from "../classes/WhileStmt";
 
@@ -18,4 +19,5 @@ export interface StmtVisitor<R> {
     visitForStmt(stmt: ForStmt): R;
     visitFunctionStmt(stmt: FunctionStmt): R;
     visitReturnStmt(stmt: ReturnStmt): R;
+    visitTryCatchStmt(stmt: TryCatchStmt): R;
   }

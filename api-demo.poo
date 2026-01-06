@@ -1,0 +1,50 @@
+// API demo script exercising built-ins, IPC, modules, and sandboxed IO.
+
+// Demo script using bytecode-supported features and host calls.
+
+print("=== Types and conversions ===");
+print(typeOf(123));
+print(typeOf("abc"));
+print(typeOf(true));
+print(string(42));
+print(number("99"));
+print(concat("len=", len("hello")));
+
+print("=== Math & random ===");
+print(abs(-5));
+print(clamp(150, 0, 100));
+print(randomInt(1, 6));
+
+print("=== KV (host) ===");
+kvSet("demo-key", "value");
+print(kvGet("demo-key"));
+kvDelete("demo-key");
+
+print("=== FS sandbox (host) ===");
+var contents = fsRead("Documents/test");
+print(contents);
+
+print("=== IPC ===");
+ipcSetContext("device-1", "process-1");
+var res = ipcSend("net.scan", "scan", "worldZone=downtown");
+print(concat("IPC scan result: ", string(res)));
+
+print("=== Logical ops ===");
+var flagA = true;
+var flagB = false;
+print(concat("flagA and flagB = ", string(flagA and flagB)));
+print(concat("flagA or flagB = ", string(flagA or flagB)));
+print(concat("not flagA = ", string(!flagA)));
+
+print("=== Handler registration ===");
+function onPing(payload) {
+  print(concat("[handler] payload: ", payload));
+  return concat("pong:", payload);
+}
+// VM handles registerHandler internally; host can later DispatchHandler("ping", ...)
+registerHandler("ping", "onPing");
+
+print("=== Events ===");
+emitEvent("hello-event");
+var ev = pollEvent();
+print(concat("polled event: ", string(ev)));

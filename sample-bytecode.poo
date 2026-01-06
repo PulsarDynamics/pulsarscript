@@ -1,0 +1,6 @@
+// Bytecode-friendly script using supported ops: computes (1+2+3) and prints 6
+var a = 1;
+var b = 2;
+var c = 3;
+var sum = a + b + c;
+print(sum);

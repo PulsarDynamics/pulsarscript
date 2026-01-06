@@ -14,6 +14,9 @@ import { Unary } from "./classes/Unary";
 import { VarStmt } from "./classes/VarStmt";
 import { Variable } from "./classes/Variable";
 import { WhileStmt } from "./classes/WhileStmt";
+import { TryCatchStmt } from "./classes/TryCatchStmt";
+import { ArrayExpr } from "./classes/ArrayExpr";
+import { ObjectExpr, type ObjectProperty } from "./classes/ObjectExpr";
 import { TokenType } from "./enums/TokenType";
 import type { Expr } from "./interfaces/Expr";
 import type { Stmt } from "./interfaces/Stmt";
@@ -87,6 +90,7 @@ export class Parser {
         if (this.match(TokenType.FOR)) return this.forStatement();
         if (this.match(TokenType.LEFT_BRACE)) return new BlockStmt(this.block());
         if (this.match(TokenType.RETURN)) return this.returnStatement();
+        if (this.match(TokenType.TRY)) return this.tryCatchStatement();
 
         return this.expressionStatement();
     }
@@ -127,14 +131,14 @@ export class Parser {
         if (this.match(TokenType.SEMICOLON)) {
             initializer = null;
         } else if (this.match(TokenType.VAR)) {
-                // Handle variable declaration in for loop initializer
-                const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
-                let init: Expr | null = null;
-                if (this.match(TokenType.EQUAL)) {
-                    init = this.expression();
-                }
-                this.consume(TokenType.SEMICOLON, "Expect ';' after variable declaration.");
-                initializer = new VarStmt(name, init);
+            // Handle variable declaration in for loop initializer
+            const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
+            let init: Expr | null = null;
+            if (this.match(TokenType.EQUAL)) {
+                init = this.expression();
+            }
+            this.consume(TokenType.SEMICOLON, "Expect ';' after variable declaration.");
+            initializer = new VarStmt(name, init);
         } else {
             initializer = this.expressionStatement();
         }
@@ -154,6 +158,25 @@ export class Parser {
         let body = this.statement();
 
         return new ForStmt(initializer, condition, increment, body);
+    }
+
+    private tryCatchStatement(): Stmt {
+        this.consume(TokenType.LEFT_BRACE, "Expect '{' after 'try'.");
+        const tryBlock = this.block();
+        let catchParam: string | null = null;
+        let catchBlock: Stmt[] = [];
+        if (this.match(TokenType.CATCH)) {
+            if (this.match(TokenType.LEFT_PAREN)) {
+                const ident = this.consume(TokenType.IDENTIFIER, "Expect identifier after 'catch('.");
+                catchParam = ident.lexeme;
+                this.consume(TokenType.RIGHT_PAREN, "Expect ')' after catch parameter.");
+            }
+            this.consume(TokenType.LEFT_BRACE, "Expect '{' to start catch block.");
+            catchBlock = this.block();
+        } else {
+            this.error(this.peek(), "Expect 'catch' after try block.");
+        }
+        return new TryCatchStmt(tryBlock, catchParam, catchBlock);
     }
 
     private returnStatement(): Stmt {
@@ -187,14 +210,14 @@ export class Parser {
     private expression(): Expr {
         return this.assignment();
     }
-    
+
     private assignment(): Expr {
         const expr = this.or();
-    
+
         if (this.match(TokenType.EQUAL)) {
             const equals = this.previous();
             const value = this.assignment();
-    
+
             if (expr instanceof Variable) {
                 const name = expr.name;
                 return new Assign(name, value);
@@ -202,7 +225,7 @@ export class Parser {
 
             this.error(equals, "Invalid assignment target.");
         }
-    
+
         return expr;
     }
 
@@ -335,6 +358,41 @@ export class Parser {
             const expr = this.expression();
             this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
             return new Grouping(expr);
+        }
+
+        // Array literal: [element, element, ...]
+        if (this.match(TokenType.LEFT_BRACKET)) {
+            const elements: Expr[] = [];
+            if (!this.check(TokenType.RIGHT_BRACKET)) {
+                do {
+                    elements.push(this.expression());
+                } while (this.match(TokenType.COMMA));
+            }
+            this.consume(TokenType.RIGHT_BRACKET, "Expect ']' after array elements.");
+            return new ArrayExpr(elements);
+        }
+
+        // Object literal: {key: value, key2: value2, ...}
+        if (this.match(TokenType.LEFT_BRACE)) {
+            const properties: ObjectProperty[] = [];
+            if (!this.check(TokenType.RIGHT_BRACE)) {
+                do {
+                    // Key must be an identifier or string
+                    let key: string;
+                    if (this.match(TokenType.IDENTIFIER)) {
+                        key = this.previous().lexeme;
+                    } else if (this.match(TokenType.STRING)) {
+                        key = this.previous().literal as string;
+                    } else {
+                        throw this.error(this.peek(), "Expect property name.");
+                    }
+                    this.consume(TokenType.COLON, "Expect ':' after property name.");
+                    const value = this.expression();
+                    properties.push({ key, value });
+                } while (this.match(TokenType.COMMA));
+            }
+            this.consume(TokenType.RIGHT_BRACE, "Expect '}' after object properties.");
+            return new ObjectExpr(properties);
         }
 
         throw this.error(this.peek(), "Expect expression.");

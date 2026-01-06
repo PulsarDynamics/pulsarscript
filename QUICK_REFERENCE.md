@@ -114,6 +114,55 @@ isInteger(10)           // true
 isFinite(1/0)           // false (in non-strict)
 ```
 
+### IPC Helpers (requires host IPC bridge)
+```javascript
+ipcNonce()                                 // Generates a random nonce
+ipcSetContext("device-1", "process-1")     // Sets default device/process for future IPC calls
+var env = ipcEnvelope("net.scan", "scan", { worldZone: "airport" })
+var res = ipcSend("net.scan", "scan", { worldZone: "airport" }) // Sends via host bridge, returns result or throws on error
+ipcSendRaw(env)                            // Send a pre-built envelope (fills defaults if missing)
+ipcSendAsync("net.scan", "scan", { worldZone: "airport" }, 
+  function (res) { print(res); }, 
+  function (err) { print(err.message); })  // Async send with callbacks (uses host sendAsync if available)
+```
+
+### Error Handling Helper
+```javascript
+tryCatch(
+  function () { return riskyCall(); },
+  function (err) { print(concat("Error: ", err.message)); return nil; }
+);
+
+// Structured try/catch syntax
+try {
+  print("do risky stuff");
+} catch (e) {
+  print(concat("Caught: ", e.message));
+}
+```
+
+### Modules (host-provided or dynamic)
+```javascript
+// Host preloads modules via interpreter options; import them at runtime:
+var utils = importModule("utils");
+print(utils.version);
+
+// Dynamically register a module
+registerModule("math2", { double: function (x) { return x + x; } });
+var m2 = importModule("math2");
+print(m2.double(10)); // 20
+```
+
+### Sandboxed I/O (host-provided IO bridge)
+```javascript
+var contents = fsRead("Documents/readme.txt");   // string or nil
+fsWrite("Documents/out.txt", "hello");           // returns true/false
+var entries = fsList("Documents");               // [{ name, isDir, size? }, ...]
+kvSet("key", 123);                               // if kv storage enabled
+print(kvGet("key"));                             // 123
+kvDelete("key");
+```
+
 ## Strict Mode
 
 ```javascript

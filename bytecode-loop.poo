@@ -1,0 +1,10 @@
+// Tests comparisons, while loop, globals, and print
+var i = 0;
+var sum = 0;
+
+while (i < 4) {
+  sum = sum + i;
+  i = i + 1;
+}
+
+print(sum); // expected 0+1+2+3 = 6

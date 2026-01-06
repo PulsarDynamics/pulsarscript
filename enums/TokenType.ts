@@ -9,7 +9,9 @@ export enum TokenType {
     PRINT = 'PRINT',
     FUNCTION = 'FUNCTION',
     RETURN = 'RETURN',
-  
+    TRY = "TRY",
+    CATCH = "CATCH",
+
     // Literals
     IDENTIFIER = 'IDENTIFIER',
     NUMBER = 'NUMBER',
@@ -18,7 +20,7 @@ export enum TokenType {
     // Logic
     FALSE = "FALSE",
     TRUE = "TRUE",
-  
+
     // Operators
     PLUS = 'PLUS',
     MINUS = 'MINUS',
@@ -34,15 +36,18 @@ export enum TokenType {
     AND = 'AND',
     OR = 'OR',
     BANG = 'BANG',
-  
+
     // Delimiters
     LEFT_PAREN = 'LEFT_PAREN',
     RIGHT_PAREN = 'RIGHT_PAREN',
     LEFT_BRACE = 'LEFT_BRACE',
     RIGHT_BRACE = 'RIGHT_BRACE',
+    LEFT_BRACKET = 'LEFT_BRACKET',
+    RIGHT_BRACKET = 'RIGHT_BRACKET',
     COMMA = 'COMMA',
+    COLON = 'COLON',
     SEMICOLON = 'SEMICOLON',
-  
+
     // Other
     EOF = 'EOF'
 }
