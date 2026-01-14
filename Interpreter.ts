@@ -675,7 +675,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
           throw this.createRuntimeError(expr.operator, "PLUS: operands must both be numbers or both be strings in strict mode.");
         } else {
           if (typeof left === 'number' && typeof right === 'number') {
-            return Number(left) + Number(right);
+            return (left as number) + (right as number);
           }
           if (typeof left === 'string' || typeof right === 'string') {
             return this.stringify(left) + this.stringify(right);
