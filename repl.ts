@@ -276,12 +276,17 @@ class REPL {
     }
 
     // Execute all accumulated input
-    const lines = buffer.split('\n').filter(line => line.trim() !== "");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith(".")) {
-        this.executeCode(trimmed);
+    // Filter out REPL commands (lines starting with '.') but keep other lines (including empty ones)
+    // to preserve line numbers and support multi-line statements.
+    const source = buffer.split('\n').map(line => {
+      if (line.trim().startsWith(".")) {
+        return "";
       }
+      return line;
+    }).join('\n');
+
+    if (source.trim()) {
+      this.executeCode(source);
     }
   }
 }
