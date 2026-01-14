@@ -264,29 +264,25 @@ class REPL {
   private async runNonInteractive(): Promise<void> {
     const stdin = Bun.stdin.stream();
     const reader = stdin.getReader();
-    let buffer = "";
+    const chunks: string[] = [];
 
     while (true) {
       const { value, done } = await reader.read();
-      
+
       if (done) break;
 
       const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
+      chunks.push(chunk);
     }
+    const buffer = chunks.join('');
 
     // Execute all accumulated input
-    // Filter out REPL commands (lines starting with '.') but keep other lines (including empty ones)
-    // to preserve line numbers and support multi-line statements.
-    const source = buffer.split('\n').map(line => {
-      if (line.trim().startsWith(".")) {
-        return "";
+    const lines = buffer.split('\n').filter(line => line.trim() !== "");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith(".")) {
+        this.executeCode(trimmed);
       }
-      return line;
-    }).join('\n');
-
-    if (source.trim()) {
-      this.executeCode(source);
     }
   }
 }

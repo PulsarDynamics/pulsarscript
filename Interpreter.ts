@@ -64,8 +64,9 @@ class Environment {
   }
 
   get(name: Token): any {
-    if (this.values.has(name.lexeme)) {
-      return this.values.get(name.lexeme);
+    const value = this.values.get(name.lexeme);
+    if (value !== undefined) {
+      return value;
     }
 
     if (this.enclosing !== null) {
@@ -359,14 +360,22 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       call: (_: Interpreter, args: any[]) => {
         if (this.options.strictTypes) {
           // In strict mode: all args must be string or number explicitly; number gets stringified, others error.
-          return args.map(a => {
-            if (typeof a === 'string') return a;
-            if (typeof a === 'number') return this.stringify(a);
+          for (let i = 0; i < args.length; i++) {
+            const a = args[i];
+            if (typeof a === 'string') continue;
+            if (typeof a === 'number') {
+              args[i] = this.stringify(a);
+              continue;
+            }
             throw this.createRuntimeError(concatToken, "concat: arguments must be string or number in strict mode");
-          }).join("");
+          }
+          return args.join("");
         }
         // Non-strict: stringify everything.
-        return args.map(a => this.stringify(a)).join("");
+        for (let i = 0; i < args.length; i++) {
+          args[i] = this.stringify(args[i]);
+        }
+        return args.join("");
       },
       toString: () => `<native concat>`
     };
@@ -667,7 +676,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
           throw this.createRuntimeError(expr.operator, "PLUS: operands must both be numbers or both be strings in strict mode.");
         } else {
           if (typeof left === 'number' && typeof right === 'number') {
-            return Number(left) + Number(right);
+            return (left as number) + (right as number);
           }
           if (typeof left === 'string' || typeof right === 'string') {
             return this.stringify(left) + this.stringify(right);
