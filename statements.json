@@ -489,7 +489,7 @@
         },
         "arguments": [
           {
-            "value": "PulsarScript"
+            "value": "pulsarscript"
           }
         ]
       }
