@@ -264,16 +264,17 @@ class REPL {
   private async runNonInteractive(): Promise<void> {
     const stdin = Bun.stdin.stream();
     const reader = stdin.getReader();
-    let buffer = "";
+    const chunks: string[] = [];
 
     while (true) {
       const { value, done } = await reader.read();
-      
+
       if (done) break;
 
       const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
+      chunks.push(chunk);
     }
+    const buffer = chunks.join('');
 
     // Execute all accumulated input
     const lines = buffer.split('\n').filter(line => line.trim() !== "");
