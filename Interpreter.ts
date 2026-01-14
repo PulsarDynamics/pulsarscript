@@ -64,8 +64,9 @@ class Environment {
   }
 
   get(name: Token): any {
-    if (this.values.has(name.lexeme)) {
-      return this.values.get(name.lexeme);
+    const value = this.values.get(name.lexeme);
+    if (value !== undefined) {
+      return value;
     }
 
     if (this.enclosing !== null) {
