@@ -359,14 +359,22 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       call: (_: Interpreter, args: any[]) => {
         if (this.options.strictTypes) {
           // In strict mode: all args must be string or number explicitly; number gets stringified, others error.
-          return args.map(a => {
-            if (typeof a === 'string') return a;
-            if (typeof a === 'number') return this.stringify(a);
+          for (let i = 0; i < args.length; i++) {
+            const a = args[i];
+            if (typeof a === 'string') continue;
+            if (typeof a === 'number') {
+              args[i] = this.stringify(a);
+              continue;
+            }
             throw this.createRuntimeError(concatToken, "concat: arguments must be string or number in strict mode");
-          }).join("");
+          }
+          return args.join("");
         }
         // Non-strict: stringify everything.
-        return args.map(a => this.stringify(a)).join("");
+        for (let i = 0; i < args.length; i++) {
+          args[i] = this.stringify(args[i]);
+        }
+        return args.join("");
       },
       toString: () => `<native concat>`
     };
