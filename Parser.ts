@@ -398,12 +398,36 @@ export class Parser {
         throw this.error(this.peek(), "Expect expression.");
     }
 
-    private match(...types: TokenType[]): boolean {
-        for (const type of types) {
-            if (this.check(type)) {
-                this.advance();
-                return true;
-            }
+    private match(type1: TokenType): boolean;
+    private match(type1: TokenType, type2: TokenType): boolean;
+    private match(type1: TokenType, type2: TokenType, type3: TokenType): boolean;
+    private match(
+        type1: TokenType,
+        type2: TokenType,
+        type3: TokenType,
+        type4: TokenType
+    ): boolean;
+    private match(
+        t1: TokenType,
+        t2?: TokenType,
+        t3?: TokenType,
+        t4?: TokenType
+    ): boolean {
+        if (this.check(t1)) {
+            this.advance();
+            return true;
+        }
+        if (t2 !== undefined && this.check(t2)) {
+            this.advance();
+            return true;
+        }
+        if (t3 !== undefined && this.check(t3)) {
+            this.advance();
+            return true;
+        }
+        if (t4 !== undefined && this.check(t4)) {
+            this.advance();
+            return true;
         }
         return false;
     }
