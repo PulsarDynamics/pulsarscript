@@ -41,46 +41,62 @@ export class Lexer {
   private scanToken() {
     const c = this.advance();
     switch (c) {
-      case '(': this.addToken(TokenType.LEFT_PAREN); break;
-      case ')': this.addToken(TokenType.RIGHT_PAREN); break;
-      case '{': this.addToken(TokenType.LEFT_BRACE); break;
-      case '}': this.addToken(TokenType.RIGHT_BRACE); break;
-      case '[': this.addToken(TokenType.LEFT_BRACKET); break;
-      case ']': this.addToken(TokenType.RIGHT_BRACKET); break;
-      case ',': this.addToken(TokenType.COMMA); break;
-      case ':': this.addToken(TokenType.COLON); break;
-      case ';': this.addToken(TokenType.SEMICOLON); break;
-      case '+': this.addToken(TokenType.PLUS); break;
-      case '-': this.addToken(TokenType.MINUS); break;
-      case '*': this.addToken(TokenType.STAR); break;
+      case '(': this.addToken(TokenType.LEFT_PAREN, null, "("); break;
+      case ')': this.addToken(TokenType.RIGHT_PAREN, null, ")"); break;
+      case '{': this.addToken(TokenType.LEFT_BRACE, null, "{"); break;
+      case '}': this.addToken(TokenType.RIGHT_BRACE, null, "}"); break;
+      case '[': this.addToken(TokenType.LEFT_BRACKET, null, "["); break;
+      case ']': this.addToken(TokenType.RIGHT_BRACKET, null, "]"); break;
+      case ',': this.addToken(TokenType.COMMA, null, ","); break;
+      case ':': this.addToken(TokenType.COLON, null, ":"); break;
+      case ';': this.addToken(TokenType.SEMICOLON, null, ";"); break;
+      case '+': this.addToken(TokenType.PLUS, null, "+"); break;
+      case '-': this.addToken(TokenType.MINUS, null, "-"); break;
+      case '*': this.addToken(TokenType.STAR, null, "*"); break;
       case '/':
         if (this.match('/')) {
           // Comment goes until the end of the line
           while (this.peek() !== '\n' && !this.isAtEnd()) this.advance();
         } else {
-          this.addToken(TokenType.SLASH);
+          this.addToken(TokenType.SLASH, null, "/");
         }
         break;
       case '=':
-        this.addToken(this.match('=') ? TokenType.EQUAL_EQUAL : TokenType.EQUAL);
+        if (this.match('=')) {
+          this.addToken(TokenType.EQUAL_EQUAL, null, "==");
+        } else {
+          this.addToken(TokenType.EQUAL, null, "=");
+        }
         break;
       case '!':
-        this.addToken(this.match('=') ? TokenType.BANG_EQUAL : TokenType.BANG);
+        if (this.match('=')) {
+          this.addToken(TokenType.BANG_EQUAL, null, "!=");
+        } else {
+          this.addToken(TokenType.BANG, null, "!");
+        }
         break;
       case '<':
-        this.addToken(this.match('=') ? TokenType.LESS_EQUAL : TokenType.LESS);
+        if (this.match('=')) {
+          this.addToken(TokenType.LESS_EQUAL, null, "<=");
+        } else {
+          this.addToken(TokenType.LESS, null, "<");
+        }
         break;
       case '>':
-        this.addToken(this.match('=') ? TokenType.GREATER_EQUAL : TokenType.GREATER);
+        if (this.match('=')) {
+          this.addToken(TokenType.GREATER_EQUAL, null, ">=");
+        } else {
+          this.addToken(TokenType.GREATER, null, ">");
+        }
         break;
       case '&':
         if (this.match('&')) {
-          this.addToken(TokenType.AND);
+          this.addToken(TokenType.AND, null, "&&");
         }
         break;
       case '|':
         if (this.match('|')) {
-          this.addToken(TokenType.OR);
+          this.addToken(TokenType.OR, null, "||");
         }
         break;
       case ' ':
@@ -118,8 +134,9 @@ export class Lexer {
     this.advance();
 
     // Trim the surrounding quotes.
-    const value = this.source.substring(this.start + 1, this.current - 1);
-    this.addToken(TokenType.STRING, value);
+    const text = this.source.substring(this.start, this.current);
+    const value = text.substring(1, text.length - 1);
+    this.addToken(TokenType.STRING, value, text);
   }
 
   private number() {
@@ -133,7 +150,8 @@ export class Lexer {
       while (this.isDigit(this.peek())) this.advance();
     }
 
-    this.addToken(TokenType.NUMBER, parseFloat(this.source.substring(this.start, this.current)));
+    const text = this.source.substring(this.start, this.current);
+    this.addToken(TokenType.NUMBER, parseFloat(text), text);
   }
 
   private identifier() {
@@ -142,7 +160,7 @@ export class Lexer {
     const text = this.source.substring(this.start, this.current);
     let type = Lexer.keywords[text];
     if (type == null) type = TokenType.IDENTIFIER;
-    this.addToken(type);
+    this.addToken(type, null, text);
   }
 
   private match(expected: string): boolean {
@@ -185,8 +203,8 @@ export class Lexer {
     return this.source.charAt(this.current++);
   }
 
-  private addToken(type: TokenType, literal: any = null) {
-    const text = this.source.substring(this.start, this.current);
+  private addToken(type: TokenType, literal: any = null, lexeme?: string) {
+    const text = lexeme !== undefined ? lexeme : this.source.substring(this.start, this.current);
     this.tokens.push({ type, lexeme: text, literal, line: this.line });
   }
 }
