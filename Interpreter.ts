@@ -28,6 +28,7 @@ import type { CallFrame } from "./ErrorReporter";
 
 const RE_INTEGER_BASE10 = /^[+-]?\d+$/;
 const RE_INTEGER_OTHER = /^[+-]?[0-9a-z]+$/i;
+const RE_FLOAT = /^[+-]?(?:\d+\.\d+|\d+\.\d*|\.\d+|\d+)$/;
 
 // Runtime error class
 export class RuntimeError extends Error {
@@ -399,7 +400,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       if (typeof s === 'number') return s;
       const str = requireString("parseFloat", s).trim();
       // Strict float: no trailing junk
-      if (!/^[+-]?(?:\d+\.\d+|\d+\.\d*|\.\d+|\d+)$/.test(str)) return null;
+      if (!RE_FLOAT.test(str)) return null;
       const n = Number(str);
       return Number.isFinite(n) ? n : null;
     });
