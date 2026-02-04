@@ -26,6 +26,9 @@ import { ErrorExpr } from "./classes/ErrorExpr";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { CallFrame } from "./ErrorReporter";
 
+const RE_INTEGER_BASE10 = /^[+-]?\d+$/;
+const RE_INTEGER_OTHER = /^[+-]?[0-9a-z]+$/i;
+
 // Runtime error class
 export class RuntimeError extends Error {
   token: Token;
@@ -387,7 +390,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       const b = requireNumber("parseInt", base);
       if (!(b >= 2 && b <= 36)) return null;
       const str = requireString("parseInt", s).trim();
-      const regex = b === 10 ? /^[+-]?\d+$/ : /^[+-]?[0-9a-z]+$/i;
+      const regex = b === 10 ? RE_INTEGER_BASE10 : RE_INTEGER_OTHER;
       if (!regex.test(str)) return null;
       const n = parseInt(str, b);
       return Number.isNaN(n) ? null : n;
