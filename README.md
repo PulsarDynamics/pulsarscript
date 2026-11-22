@@ -38,28 +38,24 @@ bun run compile.ts -c script.poo
 bun run compile.ts -s script.poo script.json
 ```
 
-Run with the Go VM:
+Run with the Go VM (in `vm/`, a Go module; needs Go 1.24+):
 
 ```bash
-# Run script
-go run ./cmd/vmrun script.json
-
-# Disassemble bytecode
-go run ./cmd/vmrun -disasm script.json
-
-# Step-by-step debugging
-go run ./cmd/vmrun -step script.json
-
-# List registered handlers
-go run ./cmd/vmrun -inspect script.json
+cd vm
+go run ./cmd/vmrun ../script.json            # run (default budgets: 10M steps, 10s)
+go run ./cmd/vmrun -disasm ../script.json    # disassemble, with the bytecode header
+go run ./cmd/vmrun -step ../script.json      # step through instructions
+go run ./cmd/vmrun -inspect ../script.json   # list registered handlers
 ```
+
+Hosts embed the VM as a Go module: `import pulsarscriptvm "github.com/PulsarDynamics/pulsarscript/vm"`, pinned to a `vm/vX.Y.Z` tag (the repository is private, so set `GOPRIVATE=github.com/PulsarDynamics/*`).
 
 ### Supported Features (Bytecode/Go VM)
 - ✅ Variables, functions, control flow (if/while/for)
 - ✅ Try/catch exception handling
 - ✅ Arrays: `[1, 2, 3]`, array host calls
 - ✅ Objects: `{name: "value"}`, object host calls  
-- ✅ 53 built-ins and host calls, listed in [`hostapi.json`](hostapi.json) (SPEC §8); unknown names fail at compile time
+- ✅ 53 built-ins and host calls, listed in [`vm/hostapi.json`](vm/hostapi.json) (SPEC §8); unknown names fail at compile time
 - ✅ Source mapping for error line numbers
 - ✅ Default step, time and call-depth budgets (SPEC §7)
 
@@ -219,15 +215,13 @@ Built with [Bun](https://bun.sh) 1.4 (pinned in CI) and TypeScript 5.6.
 bun install --frozen-lockfile
 bun run typecheck     # tsc --noEmit, must be clean
 bun test              # unit tests and golden bytecode
-bun run conformance   # conformance suite on the interpreter
+bun run conformance   # conformance suite on the interpreter and the Go VM (builds vm/ if Go is installed)
+(cd vm && go vet ./... && go test ./...)   # Go VM unit tests
 ```
 
-To also run the conformance suite on the Go VM, build `vmrun` from pulsaros-api and point at it:
+### Releasing the VM
 
-```bash
-(cd ../pulsaros-api && go build -o /tmp/vmrun ./cmd/vmrun)
-PULSARSCRIPT_VMRUN=/tmp/vmrun bun run conformance -- --require-vm
-```
+The VM is versioned with the language: tag `vm/vX.Y.Z` on `main` after a change to `vm/` (for example `git tag vm/v0.4.1 && git push origin vm/v0.4.1`), then bump the requirement in pulsaros-api's `go.mod` (`go get github.com/PulsarDynamics/pulsarscript/vm@v0.4.1`).
 
 ### Changing the language
 

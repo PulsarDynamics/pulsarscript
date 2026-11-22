@@ -62,7 +62,21 @@ const opt = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 
-const vmrun = opt("--vmrun") ?? process.env.PULSARSCRIPT_VMRUN;
+// The Go VM lives in vm/ (decision A7). Without --vmrun or PULSARSCRIPT_VMRUN, build its CLI
+// from this checkout when Go is installed, so the suite always runs against this repo's VM.
+function buildVmrun(): string | undefined {
+  if (!Bun.which("go")) return undefined;
+  const out = join(OUT, process.platform === "win32" ? "vmrun.exe" : "vmrun");
+  mkdirSync(OUT, { recursive: true });
+  const r = Bun.spawnSync(["go", "build", "-o", out, "./cmd/vmrun"], { cwd: join(REPO, "vm"), stderr: "pipe" });
+  if (r.exitCode !== 0) {
+    console.error(`could not build vm/cmd/vmrun:\n${r.stderr.toString()}`);
+    return undefined;
+  }
+  return out;
+}
+
+const vmrun = opt("--vmrun") ?? process.env.PULSARSCRIPT_VMRUN ?? (flag("--no-build") ? undefined : buildVmrun());
 const requireVm = flag("--require-vm");
 const onlyRuntime = opt("--runtime") as Runtime | undefined;
 const filter = opt("--filter");
@@ -70,7 +84,7 @@ const jsonOut = opt("--json");
 const verbose = flag("--verbose");
 
 if (requireVm && (!vmrun || !existsSync(vmrun))) {
-  console.error("--require-vm given but no vmrun binary found (set PULSARSCRIPT_VMRUN or --vmrun).");
+  console.error("--require-vm given but no vmrun binary: install Go (vm/ is built automatically) or set PULSARSCRIPT_VMRUN / --vmrun.");
   process.exit(2);
 }
 

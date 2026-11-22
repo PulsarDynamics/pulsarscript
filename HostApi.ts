@@ -1,7 +1,7 @@
-// Typed access to hostapi.json, the registry of built-in functions and host calls (SPEC §8).
+// Typed access to vm/hostapi.json, the registry of built-in functions and host calls (SPEC §8).
 // The compiler and the analyzer resolve every call against it, so an unknown name is a
 // compile-time error (D3) instead of a host call that fails at runtime.
-import registry from "./hostapi.json";
+import registry from "./vm/hostapi.json";
 
 export type ParamType = string; // "any" | "number" | "string" | "boolean" | "array" | "object" | unions with "|"
 

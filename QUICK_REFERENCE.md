@@ -131,7 +131,7 @@ try {
 }
 ```
 
-The full list of built-ins and host calls, with parameter types, is generated into SPEC.md §8 from `hostapi.json`. Calling anything else is a compile-time error.
+The full list of built-ins and host calls, with parameter types, is generated into SPEC.md §8 from `vm/hostapi.json`. Calling anything else is a compile-time error.
 
 ### Sandboxed I/O (host-provided IO bridge)
 ```javascript

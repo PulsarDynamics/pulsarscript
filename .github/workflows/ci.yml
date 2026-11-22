@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Typecheck, unit tests, conformance (interpreter)
+    name: Typecheck and unit tests (TypeScript)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,90 +29,56 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Unit tests and golden bytecode
+      - name: Unit tests, golden bytecode, SPEC table
         run: bun test
 
-      - name: Conformance (interpreter)
-        run: bun run conformance -- --runtime interp --json conformance-interp.json
+  vm:
+    name: Go VM (fmt, vet, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
+
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+  conformance:
+    name: Conformance (interpreter + Go VM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The runner builds vm/cmd/vmrun from this checkout (decision A7): no other repository needed.
+      - name: Conformance
+        run: bun run conformance -- --require-vm --json conformance.json
 
       - name: Upload conformance report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-interp
-          path: conformance-interp.json
-          if-no-files-found: ignore
-
-  conformance-vm:
-    name: Conformance (Go VM)
-    runs-on: ubuntu-latest
-    env:
-      # Fine-grained token with read access to PulsarDynamics/pulsaros-api (contents: read).
-      # The default GITHUB_TOKEN cannot read another private repository.
-      API_TOKEN: ${{ secrets.PULSAROS_API_TOKEN }}
-    steps:
-      - name: Check for pulsaros-api access
-        id: access
-        run: |
-          if [ -z "$API_TOKEN" ]; then
-            echo "::warning title=Go VM conformance skipped::Add a PULSAROS_API_TOKEN repository secret (read access to PulsarDynamics/pulsaros-api) to run the conformance suite on the Go VM."
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/checkout@v4
-        if: steps.access.outputs.enabled == 'true'
-
-      - name: Check out pulsaros-api (Go VM)
-        if: steps.access.outputs.enabled == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: PulsarDynamics/pulsaros-api
-          ref: master
-          token: ${{ secrets.PULSAROS_API_TOKEN }}
-          path: pulsaros-api
-          submodules: false
-
-      - name: Host-call registry is in sync
-        if: steps.access.outputs.enabled == 'true'
-        run: |
-          # The Go VM embeds a copy of hostapi.json; both runtimes must read the same registry.
-          if ! diff -u hostapi.json pulsaros-api/internal/pulsarscriptvm/hostapi.json; then
-            echo "::error file=hostapi.json::hostapi.json differs from pulsaros-api/internal/pulsarscriptvm/hostapi.json. Copy it over in a pulsaros-api PR."
-            exit 1
-          fi
-
-      - uses: actions/setup-go@v5
-        if: steps.access.outputs.enabled == 'true'
-        with:
-          go-version-file: pulsaros-api/go.mod
-          cache-dependency-path: pulsaros-api/go.sum
-
-      - name: Build vmrun
-        if: steps.access.outputs.enabled == 'true'
-        working-directory: pulsaros-api
-        run: go build -o "$RUNNER_TEMP/vmrun" ./cmd/vmrun
-
-      - uses: oven-sh/setup-bun@v2
-        if: steps.access.outputs.enabled == 'true'
-        with:
-          bun-version: 1.4.4
-
-      - name: Install dependencies
-        if: steps.access.outputs.enabled == 'true'
-        run: bun install --frozen-lockfile
-
-      - name: Conformance (interpreter + Go VM)
-        if: steps.access.outputs.enabled == 'true'
-        env:
-          PULSARSCRIPT_VMRUN: ${{ runner.temp }}/vmrun
-        run: bun run conformance -- --require-vm --json conformance-all.json
-
-      - name: Upload conformance report
-        if: always() && steps.access.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance-all
-          path: conformance-all.json
+          name: conformance
+          path: conformance.json
           if-no-files-found: ignore

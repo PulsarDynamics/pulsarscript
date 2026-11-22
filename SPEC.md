@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0.4 records the language **as it behaves today** (November 2026). Every defect found in the audit is fixed, decided or closed (D1–D19). v0.2 settled the value model, v0.3 made `hostapi.json` the one registry of built-ins and bounded every run, and v0.4 connects PulsarOS apps to their scripts end to end (§9) with reliable error lines (§10). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.4 records the language **as it behaves today** (November 2026). Every defect found in the audit is fixed, decided or closed (D1–D19), and Phase 1 is complete. v0.2 settled the value model, v0.3 made `vm/hostapi.json` the one registry of built-ins and bounded every run, and v0.4 connects PulsarOS apps to their scripts end to end (§9), with reliable error lines, a versioned bytecode header and the VM in this repository (§10). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -8,7 +8,7 @@
 
 | Name | Path | Role |
 | --- | --- | --- |
-| `vm` | `compile.ts` → JSON bytecode → Go VM (`pulsaros-api/internal/pulsarscriptvm`, `cmd/vmrun`) | Production runtime. Scripts in PulsarOS apps run here. |
+| `vm` | `compile.ts` → JSON bytecode → Go VM (`vm/`, CLI `vm/cmd/vmrun`; imported by pulsaros-api as a Go module) | Production runtime. Scripts in PulsarOS apps run here. |
 | `interp` | `Lexer` → `Parser` → `SemanticAnalyzer` → `Interpreter` (TypeScript; `repl.ts`, `host.ts`) | Development runtime (REPL, embedding). Its future is decision A1 in the development plan. |
 
 ---
@@ -207,7 +207,7 @@ A `vm` step is one bytecode instruction; an `interp` step is one statement, loop
 
 ## 8. Built-in functions and host calls
 
-Every function a script can call without declaring it is listed in **`hostapi.json`**, the registry shared by the compiler, the analyzer, the interpreter and the Go VM (decision A3; fixed D5, where each runtime kept its own list). An entry gives the name, the parameters with their types, the return type and, for host calls, the capability it will require (decision A4, not enforced yet).
+Every function a script can call without declaring it is listed in **`vm/hostapi.json`**, the one registry read by the compiler, the analyzer, the interpreter and the Go VM (decision A3; fixed D5, where each runtime kept its own list). An entry gives the name, the parameters with their types, the return type and, for host calls, the capability it will require (decision A4, not enforced yet).
 
 - **Core** functions are pure and implemented inside every runtime, so they behave the same on every host.
 - **Host** functions are supplied by the embedding host (the PulsarOS API's script manager, `host.ts` bridges, or `vmrun -sandbox-root` for `fsRead`/`fsWrite`/`fsList`/`fsExists`). A host that does not provide one raises a runtime error when it is called; `vmrun` alone returns `nil`.
@@ -218,7 +218,7 @@ Host calls are encapsulated in three layers:
 2. **Load time:** the VM verifies a module before running it: every opcode is known, and every `HOST_CALL` names a registry entry with a valid argument count. Hand-written or stale bytecode that calls anything else is rejected with `invalid module: unknown host call …`.
 3. **Call time:** argument types are checked against the registry. Core calls run inside the VM; only host entries reach the host's `HostCall` callback.
 
-To add a built-in: add the entry to `hostapi.json`, implement it in `Interpreter.ts` (core or host) and, for core, in `pulsarscriptvm/builtins.go`, copy `hostapi.json` into pulsaros-api, add conformance cases, and run `bun run gen:hostapi` to refresh the table below. Tests on both sides fail if an entry has no implementation or an implementation has no entry.
+To add a built-in: add the entry to `hostapi.json`, implement it in `Interpreter.ts` (core or host) and, for core, in `vm/builtins.go`, add conformance cases, and run `bun run gen:hostapi` to refresh the table below. Tests on both sides fail if an entry has no implementation or an implementation has no entry.
 
 Notes on the core functions:
 - String indices and lengths (`len`, `indexOf`, `substr`) count Unicode code points.
@@ -313,15 +313,21 @@ Notes on the core functions:
 - **Calling a handler** (fixed in D11): the app sends the IPC envelope `{v: 1, deviceId, processId, channel: "ipc.call", op: "script.call", payload: {appId, handler, args}, nonce, ts}` to the API's `/api/ipc`; services use `script.service.start`, `stop` and `status`. A non-list `args` is the handler's one argument; a list is the argument list. Arguments and results convert between JSON and PulsarScript values in both directions, objects and arrays included. An app can always call its own handlers and no other app's.
 - Handlers run with the app's identity and permissions. A script's `ipcSend(channel, op, payload)` reaches only the channels in the manifest's `permissions.scopes` (none without scopes), is rate-limited and raises a runtime error when refused or when the target fails. `ipcSetContext` cannot switch a server script to another device or process.
 
-## 10. Bytecode format (v0)
+## 10. Bytecode format (version 1)
 
-Produced by `compile.ts`, consumed by the Go VM. JSON:
+Produced by `compile.ts`, consumed by the Go VM (`vm/`, a Go module in this repository; hosts import `github.com/PulsarDynamics/pulsarscript/vm` at a `vm/vX.Y.Z` tag). JSON:
 
 ```json
-{ "constants": [ … ], "code": [ … ], "functions": [ { "name", "address", "arity", "locals" } ], "lineMap": [ … ] }
+{
+  "format": "pulsarscript-bytecode", "version": 1,
+  "compiler": "pulsarscript 0.4.0", "sourceHash": "sha256:…",
+  "constants": [ … ], "code": [ … ], "functions": [ { "name", "address", "arity", "locals" } ], "lineMap": [ … ]
+}
 ```
 
-- `code` is a flat array of opcode numbers, each followed by its operands. The opcode numbers are fixed by `Bytecode.ts`, mirrored in Go and pinned by a snapshot test; changing a number is a breaking format change.
+**Header** (decision A5): `format` identifies the file; `version` is the format version (`Bytecode.ts` `BYTECODE_VERSION`, Go `BytecodeVersion`); `compiler` names the compiler that wrote it; `sourceHash` is the SHA-256 of the UTF-8 source, so tools can tell a bundle that is stale against its `.poo` source. The VM loads version 1 and version 0 (a file with no header, written before SPEC v0.4, otherwise identical) and **rejects any other version or format** with an error asking to recompile or upgrade. Any change the VM must know about (opcodes, operands, fields) bumps the version.
+
+- `code` is a flat array of opcode numbers, each followed by its operands. The opcode numbers are fixed by `Bytecode.ts`, mirrored in `vm/vm.go` and checked against each other by a Go test and a snapshot test; changing a number is a breaking format change and needs a version bump.
 - Operand counts: 1 for `CONST`, `DEFINE_GLOBAL`, `GET_GLOBAL`, `SET_GLOBAL`, `GET_LOCAL`, `SET_LOCAL`, `JUMP`, `JUMP_IF_FALSE`, `ENTER_BLOCK`, `EXIT_BLOCK`, `TRY_PUSH`, `NEW_ARRAY`, `NEW_OBJECT`; **2** for `CALL` (address, argument count) and `HOST_CALL` (name constant, argument count); 0 for the rest.
 
 - Opcode names and operand counts live in one table in the VM (`OpcodeName`), used by the loader's verifier, `vmrun -disasm` and step mode. (Fixed in D9: the disassembler used to decode `CALL` with one operand.)
@@ -332,12 +338,11 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 - `lineMap[i]` is the source line for `code[i]`, present when compiled with `-s`.
 
 - `lineMap` has exactly one entry per `code` element. Each instruction maps to the line of the AST node that emitted it, and the VM reports the line of the instruction being executed. (Fixed in D18: the line only advanced at `var` statements, and jump placeholders added no entries, so the map drifted.)
-- There is no version field yet. Phase 1 adds a header `{format, version, compiler, sourceHash}`, and the loader will reject unknown versions.
 - `YIELD`, `SLEEP`, `EMIT_EVENT` and `POLL_EVENT` exist in the VM but are never emitted by the compiler in v0.
 
 ## 11. Conformance
 
-- `bun run conformance` runs every case on `interp`, and on the `vm` when `PULSARSCRIPT_VMRUN` points at a `vmrun` binary (`--require-vm` makes that mandatory). Cases are compiled with a line map (`-s`).
+- `bun run conformance` runs every case on `interp` and on the `vm`. It builds `vm/cmd/vmrun` from the checkout when Go is installed; `PULSARSCRIPT_VMRUN` or `--vmrun` point at another binary, and `--require-vm` fails the run when no VM is available. Cases are compiled with a line map (`-s`).
 - A case is `<name>.poo` plus `<name>.expected`: one line per printed value, then an optional `!error` or `!error: <kind>` line (`parse`, `semantic`, `runtime`, `compile`).
 - Known defects are marked in the case with `// @xfail <runtimes> <defect> <note>`. A marked case that starts passing fails the run until the marker is removed, so fixes are never silent.
 
