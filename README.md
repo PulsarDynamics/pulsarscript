@@ -29,13 +29,13 @@ Compile PulsarScript to bytecode for the Go VM:
 
 ```bash
 # Compile script to bytecode
-bun run compile.ts script.poo script.json
+bun run compile.ts script.puls script.json
 
 # Compile with syntax check only
-bun run compile.ts -c script.poo
+bun run compile.ts -c script.puls
 
 # Compile with source mapping for better error messages
-bun run compile.ts -s script.poo script.json
+bun run compile.ts -s script.puls script.json
 ```
 
 Run with the Go VM (in `vm/`, a Go module; needs Go 1.24+):
@@ -192,11 +192,11 @@ pulsarscript/
 ├── classes/             # AST node classes
 ├── interfaces/          # Type definitions
 ├── enums/               # Token types
-├── examples/            # Sample .poo scripts
+├── examples/            # Sample .puls scripts
 └── tests/
     ├── unit/            # bun test: lexer, parser, compiler
     ├── golden/          # golden bytecode (UPDATE_GOLDEN=1 bun test to regenerate)
-    └── conformance/     # language conformance suite (.poo + .expected)
+    └── conformance/     # language conformance suite (.puls + .expected)
 ```
 
 ## Documentation
@@ -226,7 +226,7 @@ The VM is versioned with the language: tag `vm/vX.Y.Z` on `main` after a change 
 ### Changing the language
 
 1. Update [SPEC.md](./SPEC.md).
-2. Add or change cases in `tests/conformance/` (`<name>.poo` + `<name>.expected`).
+2. Add or change cases in `tests/conformance/` (`<name>.puls` + `<name>.expected`).
 3. Implement it. Known gaps are marked `// @xfail <runtime> <defect> <note>` in the case; when a fix makes one pass, the runner reports XPASS and fails until you remove the marker.
 
 ## License

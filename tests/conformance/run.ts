@@ -1,6 +1,6 @@
 // PulsarScript conformance runner.
 //
-// Every tests/conformance/**/<name>.poo has a sibling <name>.expected that holds the
+// Every tests/conformance/**/<name>.puls has a sibling <name>.expected that holds the
 // output the language SPEC requires: one line per print(), and, if the program must
 // fail, a final line "!error" or "!error: <kind>" (kind = parse | semantic | runtime |
 // compile | timeout). An "!error..." line matches when the actual error line starts
@@ -10,7 +10,7 @@
 //   interp  TypeScript tree-walking interpreter (tests/conformance/interp-runner.ts)
 //   vm      compile.ts -> bytecode -> Go VM (`vmrun`; set PULSARSCRIPT_VMRUN or --vmrun)
 //
-// Directives in the leading comment block of a .poo file:
+// Directives in the leading comment block of a .puls file:
 //   // @xfail <runtimes> <defect-id> <note>   runtime is known to fail this case
 //   // @skip  <runtimes> <note>               do not run on that runtime
 // <runtimes> is a comma-separated list of interp, vm, or "all".
@@ -94,7 +94,7 @@ function findCases(dir: string): string[] {
     if (entry.startsWith(".")) continue;
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) out.push(...findCases(p));
-    else if (entry.endsWith(".poo")) out.push(p);
+    else if (entry.endsWith(".puls")) out.push(p);
   }
   return out.sort();
 }
@@ -127,11 +127,11 @@ async function loadCase(file: string): Promise<Case> {
       skip.push({ runtimes: parseRuntimes(rts), defect: "", note: rest });
     }
   }
-  const expFile = file.replace(/\.poo$/, ".expected");
+  const expFile = file.replace(/\.puls$/, ".expected");
   if (!existsSync(expFile)) throw new Error(`missing ${relative(REPO, expFile)}`);
   const raw = (await Bun.file(expFile).text()).replace(/\r/g, "");
   const expected = raw === "" ? [] : raw.replace(/\n$/, "").split("\n");
-  return { file, name: relative(ROOT, file).replace(/\.poo$/, ""), expected, xfail, skip };
+  return { file, name: relative(ROOT, file).replace(/\.puls$/, ""), expected, xfail, skip };
 }
 
 async function run(cmd: string[]): Promise<{ stdout: string; stderr: string; code: number | null; timedOut: boolean }> {

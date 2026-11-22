@@ -55,7 +55,7 @@ describe("bytecode format", () => {
 });
 
 describe("compiler: golden bytecode", () => {
-  const sources = readdirSync(GOLDEN).filter((f) => f.endsWith(".poo")).sort();
+  const sources = readdirSync(GOLDEN).filter((f) => f.endsWith(".puls")).sort();
 
   test("golden directory has cases", () => {
     expect(sources.length).toBeGreaterThan(0);
@@ -64,7 +64,7 @@ describe("compiler: golden bytecode", () => {
   for (const file of sources) {
     test(file, async () => {
       const chunk = compile(await Bun.file(join(GOLDEN, file)).text());
-      const goldenPath = join(GOLDEN, file.replace(/\.poo$/, ".bytecode.golden.json"));
+      const goldenPath = join(GOLDEN, file.replace(/\.puls$/, ".bytecode.golden.json"));
       const actual = JSON.stringify(chunk, null, 2) + "\n";
       if (UPDATE || !existsSync(goldenPath)) {
         await Bun.write(goldenPath, actual);
@@ -77,7 +77,7 @@ describe("compiler: golden bytecode", () => {
 });
 
 describe("compiler: structural invariants", () => {
-  const programs = readdirSync(GOLDEN).filter((f) => f.endsWith(".poo"));
+  const programs = readdirSync(GOLDEN).filter((f) => f.endsWith(".puls"));
 
   for (const file of programs) {
     test(`${file}: decodes cleanly, operands in range, ends in HALT`, async () => {
@@ -155,7 +155,7 @@ describe("compiler: structural invariants", () => {
 
 describe("compiler: line map (D18)", () => {
   test("has one entry per code word for every golden program", async () => {
-    for (const file of readdirSync(GOLDEN).filter((f) => f.endsWith(".poo"))) {
+    for (const file of readdirSync(GOLDEN).filter((f) => f.endsWith(".puls"))) {
       const chunk = compile(await Bun.file(join(GOLDEN, file)).text());
       expect(chunk.lineMap!.length).toBe(chunk.code.length);
     }

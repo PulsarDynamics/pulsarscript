@@ -1,9 +1,9 @@
-// Runs one .poo file through the TypeScript tree-walking interpreter and prints
+// Runs one .puls file through the TypeScript tree-walking interpreter and prints
 // program output in the conformance format:
 //   - every print() line as-is
 //   - on failure, a final line "!error: <kind>: <message>" where kind is
 //     parse | semantic | runtime | internal
-// Usage: bun tests/conformance/interp-runner.ts <file.poo>
+// Usage: bun tests/conformance/interp-runner.ts <file.puls>
 import { Lexer } from "../../Lexer";
 import { Parser, ParseError } from "../../Parser";
 import { SemanticAnalyzer, SemanticError } from "../../SemanticAnalyzer";
@@ -11,7 +11,7 @@ import { Interpreter, RuntimeError } from "../../Interpreter";
 
 const file = process.argv[2];
 if (!file) {
-  console.error("usage: interp-runner.ts <file.poo>");
+  console.error("usage: interp-runner.ts <file.puls>");
   process.exit(2);
 }
 
