@@ -1,0 +1,9 @@
+// @xfail interp D3 analyzer rejects the unknown name at compile time, before try/catch can run
+try {
+  print("before");
+  notAFunction();
+  print("not reached");
+} catch (e) {
+  print("caught");
+}
+print("after");

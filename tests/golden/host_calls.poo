@@ -1,0 +1,2 @@
+print(typeOf(1));
+print(concat("a", "b"));

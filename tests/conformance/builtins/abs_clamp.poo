@@ -1,0 +1,5 @@
+// @xfail vm D5 whitelisted on the VM but not implemented by vmrun (returns nil)
+print(abs(-5));
+print(abs(3));
+print(clamp(150, 0, 100));
+print(clamp(-5, 0, 100));

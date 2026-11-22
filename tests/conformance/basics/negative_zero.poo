@@ -1,0 +1,2 @@
+// @xfail vm D14 Go VM prints -0
+print(-0);

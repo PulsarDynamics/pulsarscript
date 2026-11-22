@@ -1,0 +1,4 @@
+print(typeOf(1));
+print(typeOf("s"));
+print(typeOf(true));
+print(typeOf(nil));

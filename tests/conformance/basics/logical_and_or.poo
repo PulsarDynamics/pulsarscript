@@ -1,0 +1,5 @@
+// @xfail vm D16 AND/OR fail with stack underflow on the VM
+print(true && false);
+print(true || false);
+print(false || false);
+print(true && true);

@@ -1,0 +1,4 @@
+// @xfail vm D1 top-level vars compile as locals; functions see undefined global
+var x = 1;
+function f() { return x; }
+print(f());

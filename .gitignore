@@ -119,3 +119,9 @@ dist
 
 
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Node,Bun
+# PulsarScript build/debug outputs
+*.bytecode.json
+examples/*.json
+tokens.json
+statements.json
+tests/conformance/.out/

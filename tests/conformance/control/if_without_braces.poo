@@ -1,0 +1,2 @@
+if (true) print("one");
+if (false) print("two"); else print("three");

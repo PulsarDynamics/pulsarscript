@@ -1,0 +1,4 @@
+// @xfail vm D5 built-in missing from the Go VM host-call whitelist
+print(trim("  hi  "));
+print(indexOf("hello", "ll"));
+print(substr("hamburger", 3, 5));

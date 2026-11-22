@@ -1,0 +1,4 @@
+// @xfail all D16 interp evaluates both operands; vm fails with stack underflow
+function boom() { print("evaluated"); return true; }
+print(false && boom());
+print(true || boom());

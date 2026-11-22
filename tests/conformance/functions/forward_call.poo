@@ -1,0 +1,4 @@
+// @xfail all D2 interp: analyzer rejects the later-declared name; vm: compiles as a host call
+function a() { return b() + 1; }
+function b() { return 41; }
+print(a());

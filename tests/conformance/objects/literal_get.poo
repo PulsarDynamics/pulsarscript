@@ -1,0 +1,4 @@
+// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
+var o = {name: "pulsar", version: 6};
+print(objGet(o, "name"));
+print(objGet(o, "version"));
