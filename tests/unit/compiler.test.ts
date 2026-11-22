@@ -1,0 +1,130 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { Lexer } from "../../Lexer";
+import { Parser } from "../../Parser";
+import { BytecodeCompiler } from "../../BytecodeCompiler";
+import { Opcode, type Chunk } from "../../Bytecode";
+
+const GOLDEN = join(dirname(new URL(import.meta.url).pathname), "..", "golden");
+const UPDATE = !!process.env.UPDATE_GOLDEN;
+
+const compile = (src: string): Chunk => BytecodeCompiler.compile(new Parser(new Lexer(src).scanTokens()).parse());
+
+// Operand count per opcode, as emitted by BytecodeCompiler today. CALL carries two operands
+// (function address, argument count); vmrun's disassembler decodes only one (defect D9).
+const OPERANDS: Partial<Record<Opcode, number>> = {
+  [Opcode.CONST]: 1,
+  [Opcode.DEFINE_GLOBAL]: 1,
+  [Opcode.GET_GLOBAL]: 1,
+  [Opcode.SET_GLOBAL]: 1,
+  [Opcode.GET_LOCAL]: 1,
+  [Opcode.SET_LOCAL]: 1,
+  [Opcode.JUMP]: 1,
+  [Opcode.JUMP_IF_FALSE]: 1,
+  [Opcode.CALL]: 2,
+  [Opcode.HOST_CALL]: 2,
+  [Opcode.ENTER_BLOCK]: 1,
+  [Opcode.EXIT_BLOCK]: 1,
+  [Opcode.TRY_PUSH]: 1,
+  [Opcode.NEW_ARRAY]: 1,
+  [Opcode.NEW_OBJECT]: 1,
+};
+
+/** Walk the code stream instruction by instruction; throws on an unknown opcode. */
+function decode(chunk: Chunk): { at: number; op: Opcode; args: number[] }[] {
+  const out: { at: number; op: Opcode; args: number[] }[] = [];
+  let ip = 0;
+  while (ip < chunk.code.length) {
+    const op = chunk.code[ip] as Opcode;
+    if (Opcode[op] === undefined) throw new Error(`unknown opcode ${op} at ${ip}`);
+    const n = OPERANDS[op] ?? 0;
+    out.push({ at: ip, op, args: chunk.code.slice(ip + 1, ip + 1 + n) });
+    ip += 1 + n;
+  }
+  return out;
+}
+
+describe("bytecode format", () => {
+  test("opcode numbers are stable (changing one is a breaking format change)", () => {
+    const table = Object.fromEntries(
+      Object.entries(Opcode).filter(([k]) => isNaN(Number(k))) as [string, number][]
+    );
+    expect(table).toMatchSnapshot();
+  });
+});
+
+describe("compiler: golden bytecode", () => {
+  const sources = readdirSync(GOLDEN).filter((f) => f.endsWith(".poo")).sort();
+
+  test("golden directory has cases", () => {
+    expect(sources.length).toBeGreaterThan(0);
+  });
+
+  for (const file of sources) {
+    test(file, async () => {
+      const chunk = compile(await Bun.file(join(GOLDEN, file)).text());
+      const goldenPath = join(GOLDEN, file.replace(/\.poo$/, ".bytecode.golden.json"));
+      const actual = JSON.stringify(chunk, null, 2) + "\n";
+      if (UPDATE || !existsSync(goldenPath)) {
+        await Bun.write(goldenPath, actual);
+        if (!UPDATE) throw new Error(`created missing golden ${goldenPath}; review and commit it`);
+        return;
+      }
+      expect(actual).toBe(await Bun.file(goldenPath).text());
+    });
+  }
+});
+
+describe("compiler: structural invariants", () => {
+  const programs = readdirSync(GOLDEN).filter((f) => f.endsWith(".poo"));
+
+  for (const file of programs) {
+    test(`${file}: decodes cleanly, operands in range, ends in HALT`, async () => {
+      const chunk = compile(await Bun.file(join(GOLDEN, file)).text());
+      const ins = decode(chunk);
+      const starts = new Set(ins.map((i) => i.at));
+      expect(ins.at(-1)?.op).toBe(Opcode.HALT);
+      for (const i of ins) {
+        if (i.op === Opcode.CONST || i.op === Opcode.GET_GLOBAL || i.op === Opcode.SET_GLOBAL || i.op === Opcode.DEFINE_GLOBAL || i.op === Opcode.HOST_CALL) {
+          expect(i.args[0]).toBeLessThan(chunk.constants.length);
+        }
+        if (i.op === Opcode.CALL) {
+          expect(starts.has(i.args[0])).toBe(true);
+        }
+      }
+      for (const fn of chunk.functions ?? []) {
+        expect(starts.has(fn.address)).toBe(true);
+      }
+    });
+  }
+
+  test("line map has one entry per code slot", () => {
+    const chunk = compile("var a = 1;\nprint(a);\n");
+    expect(chunk.lineMap).toHaveLength(chunk.code.length);
+  });
+
+  test("function table records name, arity and locals", () => {
+    const chunk = compile("function f(a, b) { var c = a; return c; }\n");
+    expect(chunk.functions).toHaveLength(1);
+    const [fn] = chunk.functions!;
+    expect(fn.name).toBe("f");
+    expect(fn.arity).toBe(2);
+    expect(fn.locals).toBe(3);
+  });
+
+  test("current behaviour: top-level var compiles to a local slot (D1)", () => {
+    const ops = decode(compile("var x = 1;\n")).map((i) => i.op);
+    expect(ops).toContain(Opcode.SET_LOCAL);
+    expect(ops).not.toContain(Opcode.DEFINE_GLOBAL);
+  });
+
+  test.todo("SPEC: top-level var compiles to DEFINE_GLOBAL (D1)");
+
+  test("current behaviour: a call to a later-declared function compiles as HOST_CALL (D2)", () => {
+    const ops = decode(compile("function a() { return b(); }\nfunction b() { return 1; }\n")).map((i) => i.op);
+    expect(ops).toContain(Opcode.HOST_CALL);
+  });
+
+  test.todo("SPEC: calls to functions declared later in the file compile as CALL (D2)");
+});
