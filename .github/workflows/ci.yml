@@ -74,6 +74,15 @@ jobs:
           path: pulsaros-api
           submodules: false
 
+      - name: Host-call registry is in sync
+        if: steps.access.outputs.enabled == 'true'
+        run: |
+          # The Go VM embeds a copy of hostapi.json; both runtimes must read the same registry.
+          if ! diff -u hostapi.json pulsaros-api/internal/pulsarscriptvm/hostapi.json; then
+            echo "::error file=hostapi.json::hostapi.json differs from pulsaros-api/internal/pulsarscriptvm/hostapi.json. Copy it over in a pulsaros-api PR."
+            exit 1
+          fi
+
       - uses: actions/setup-go@v5
         if: steps.access.outputs.enabled == 'true'
         with:

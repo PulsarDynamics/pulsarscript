@@ -19,6 +19,7 @@ import { ForStmt } from "./classes/ForStmt";
 import { ReturnStmt } from "./classes/ReturnStmt";
 import { FunctionStmt } from "./classes/FunctionStmt";
 import { SemanticError } from "./SemanticAnalyzer";
+import { arityError, lookupHostFunction } from "./HostApi";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr } from "./classes/ObjectExpr";
@@ -426,6 +427,14 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(expr.arguments.length);
       return;
     }
+    // Anything else must be a registered built-in or host call (hostapi.json). An unknown name
+    // is a compile-time error, never a HOST_CALL that fails at runtime (SPEC 4.6, D3).
+    const host = lookupHostFunction(calleeName);
+    if (!host) {
+      throw new SemanticError(expr.callee.name, `Unknown function '${calleeName}'.`);
+    }
+    const arity = arityError(host, expr.arguments.length);
+    if (arity) throw new SemanticError(expr.paren, arity);
     const nameIdx = this.addConstant(calleeName);
     this.emit(Opcode.HOST_CALL, nameIdx);
     this.emit(expr.arguments.length);

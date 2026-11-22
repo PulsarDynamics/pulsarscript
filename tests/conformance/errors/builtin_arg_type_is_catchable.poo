@@ -1,0 +1,3 @@
+// Wrong argument types are runtime errors, so try/catch sees them.
+try { abs("x"); } catch (e) { print("caught"); }
+try { len(5); } catch (e) { print("caught again"); }

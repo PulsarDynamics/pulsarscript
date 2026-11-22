@@ -1,2 +1,1 @@
-// @xfail vm D5 built-in missing from the Go VM host-call whitelist
 print(typeOf(clock()));

@@ -28,9 +28,8 @@ import { ErrorExpr } from "./classes/ErrorExpr";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { CallFrame } from "./ErrorReporter";
 import { fromHost, isArray, isObject, sortedKeys, stringify, toHost, toNumber, typeName, valuesEqual } from "./Values";
+import { HOST_FUNCTIONS, arityError, arityRange, lookupHostFunction, type HostFunction } from "./HostApi";
 
-const RE_INTEGER_BASE10 = /^[+-]?\d+$/;
-const RE_INTEGER_OTHER = /^[+-]?[0-9a-z]+$/i;
 const RE_FLOAT = /^[+-]?(?:\d+\.\d+|\d+\.\d*|\.\d+|\d+)$/;
 
 // Runtime error class
@@ -42,6 +41,16 @@ export class RuntimeError extends Error {
     super(message);
     this.token = token;
     this.callStack = callStack;
+  }
+}
+
+/**
+ * A step or time budget ran out (D10). It is a RuntimeError so hosts report it like one, but
+ * try/catch never catches it: a script must not be able to outlive its budget.
+ */
+export class BudgetError extends RuntimeError {
+  constructor(message: string) {
+    super({ type: TokenType.IDENTIFIER, lexeme: "", literal: null, line: 0 } as Token, message);
   }
 }
 
@@ -69,6 +78,10 @@ class Environment {
 
   define(name: string, value: any): void {
     this.values.set(name, value);
+  }
+
+  getOwn(name: string): any {
+    return this.values.get(name);
   }
 
   get(name: Token): any {
@@ -129,8 +142,8 @@ class PulsarFunction implements PulsarCallable {
   call(interpreter: Interpreter, args: any[]): any {
     const environment = new Environment(this.closure);
     
-    // Add this function call to the stack
-    interpreter.pushCallFrame({
+    // Add this function call to the stack (enforces the call-depth limit and the step budget)
+    interpreter.enterCall(this.declaration.name, {
       functionName: this.declaration.name.lexeme,
       line: this.declaration.name.line
     });
@@ -162,405 +175,354 @@ class PulsarFunction implements PulsarCallable {
 }
 
 // Main Interpreter class
+
+/**
+ * Execution limits (SPEC §7, D10). Every run is bounded by default so a runaway script stops
+ * with an uncatchable budget error instead of hanging its host. 0 or Infinity disables a limit.
+ * A step is one statement, loop iteration or call; the Go VM counts bytecode instructions, so
+ * the two step counts are comparable only roughly.
+ */
+export interface ExecutionLimits {
+  maxSteps?: number;
+  timeoutMs?: number;
+  maxCallDepth?: number;
+}
+
+export const DEFAULT_LIMITS: Required<ExecutionLimits> = {
+  maxSteps: 10_000_000,
+  timeoutMs: 10_000,
+  maxCallDepth: 256,
+};
+
+/** Bridge for emitEvent/pollEvent (host provided). */
+export interface EventBridge {
+  emit(payload: unknown): unknown;
+  poll(): unknown;
+}
+
 export type InterpreterOptions = {
   strictTypes?: boolean;
   ipc?: IPCBridge;
   defaultDeviceId?: string;
   defaultProcessId?: string;
-  modules?: Record<string, any>;
-  moduleLoader?: (name: string) => any;
   io?: IOBridge;
+  events?: EventBridge;
+  limits?: ExecutionLimits;
 };
+
+const KIND_OF = (v: any): string => typeName(v);
 
 export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   private globals: Environment;
   private environment: Environment;
   // strictTypes defaults to true: arithmetic on non-numbers is a runtime error, as on the VM
-  // (SPEC §4.2). strictTypes: false restores the old coercing behaviour for built-in arguments.
-  private options: InterpreterOptions & { strictTypes: boolean; modules: Record<string, any> } = {
-    strictTypes: true,
-    ipc: undefined,
-    defaultDeviceId: undefined,
-    defaultProcessId: undefined,
-    modules: {},
-    moduleLoader: undefined,
-    io: undefined,
-  };
+  // (SPEC §4.2). strictTypes: false makes built-ins coerce their arguments instead.
+  private options: { strictTypes: boolean; ipc?: IPCBridge; defaultDeviceId?: string; defaultProcessId?: string; io?: IOBridge; events?: EventBridge };
+  private limits: Required<ExecutionLimits>;
+  private steps = 0;
+  private deadline = Infinity;
   private callStack: CallFrame[] = [];
   private ipcBridge?: IPCBridge;
   private ipcDefaults: { deviceId?: string; processId?: string } = {};
-  private moduleCache: Map<string, any> = new Map();
+  private handlers: Map<string, PulsarFunction> = new Map();
+  private rngState: number | null = null;
 
-  constructor(options?: InterpreterOptions) {
+  constructor(options: InterpreterOptions = {}) {
     // Initialize globals with reference to this interpreter
     this.globals = new Environment(null, this);
     this.environment = this.globals;
-    if (options) {
-      this.options = {
-        strictTypes: options.strictTypes ?? true,
-        ipc: options.ipc,
-        defaultDeviceId: options.defaultDeviceId,
-        defaultProcessId: options.defaultProcessId,
-        modules: options.modules ?? {},
-        moduleLoader: options.moduleLoader,
-        io: options.io,
-      };
-    }
+    this.options = {
+      strictTypes: options.strictTypes ?? true,
+      ipc: options.ipc,
+      defaultDeviceId: options.defaultDeviceId,
+      defaultProcessId: options.defaultProcessId,
+      io: options.io,
+      events: options.events,
+    };
+    this.limits = { ...DEFAULT_LIMITS, ...options.limits };
     this.ipcBridge = this.options.ipc;
     this.ipcDefaults.deviceId = this.options.defaultDeviceId ?? this.ipcBridge?.defaultDeviceId;
     this.ipcDefaults.processId = this.options.defaultProcessId ?? this.ipcBridge?.defaultProcessId;
-    // Preload provided modules
-    Object.entries(this.options.modules).forEach(([k, v]) => this.moduleCache.set(k, v));
-    // Register standard library (built-in) functions
-    const defineNative = (name: string, arity: number, impl: (...args: any[]) => any) => {
-      const native: PulsarCallable = {
-        arity: () => arity,
-        call: (_: Interpreter, args: any[]) => impl(...args),
-        toString: () => `<native ${name}>`
-      };
-      this.globals.define(name, native);
-    };
 
-    const mkNativeToken = (name: string): Token => ({ type: TokenType.IDENTIFIER, lexeme: name, literal: null, line: 0 } as Token);
-    const requireNumber = (name: string, v: any): number => {
-      if (typeof v === 'number') return v;
-      if (this.options.strictTypes) throw this.createRuntimeError(mkNativeToken(name), `${name}: expected number`);
-      return Number(v);
+    const nativeToken = (name: string): Token => ({ type: TokenType.IDENTIFIER, lexeme: name, literal: null, line: 0 } as Token);
+    const fail = (name: string, message: string): never => {
+      throw this.createRuntimeError(nativeToken(name), `${name}: ${message}`);
     };
-    const requireString = (name: string, v: any): string => {
-      if (typeof v === 'string') return v;
-      if (this.options.strictTypes) throw this.createRuntimeError(mkNativeToken(name), `${name}: expected string`);
-      return String(v);
-    };
-    const loadModule = (name: any): any => {
-      const key = requireString("importModule", name);
-      if (this.moduleCache.has(key)) {
-        return this.moduleCache.get(key);
-      }
-      if (this.options.moduleLoader) {
-        const mod = this.options.moduleLoader(key);
-        this.moduleCache.set(key, mod);
-        return mod;
-      }
-      if (Object.prototype.hasOwnProperty.call(this.options.modules, key)) {
-        const mod = (this.options.modules as any)[key];
-        this.moduleCache.set(key, mod);
-        return mod;
-      }
-      throw this.createRuntimeError(mkNativeToken("importModule"), `module '${key}' not found`);
-    };
-    const ensureIO = () => {
-      if (!this.options.io) throw this.createRuntimeError(mkNativeToken("io"), "IO bridge not configured");
-      return this.options.io;
-    };
+    const num = (name: string, v: any): number => (typeof v === "number" ? v : this.options.strictTypes ? fail(name, "expected number") : Number(v));
+    const str = (name: string, v: any): string => (typeof v === "string" ? v : this.options.strictTypes ? fail(name, "expected string") : this.stringify(v));
+    const ensureIO = (name: string): IOBridge => this.options.io ?? fail(name, "IO bridge not configured");
+    const ensureIPC = (name: string): IPCBridge => this.ipcBridge ?? fail(name, "IPC bridge not configured");
+    const ensureEvents = (name: string): EventBridge => this.options.events ?? fail(name, "event bridge not configured");
     // Host results become language values; async results stay promises (resolved by the host).
-    const wrapPromise = (val: any) => (val instanceof Promise ? val.then(fromHost) : fromHost(val));
-    const ensureIPC = () => {
-      if (!this.ipcBridge) throw this.createRuntimeError(mkNativeToken("ipc"), "IPC bridge not configured");
-      return this.ipcBridge;
+    const fromHostResult = (val: any) => (val instanceof Promise ? val.then(fromHost) : fromHost(val));
+    const codePoints = (s: string) => [...s];
+    const key = (k: any): string => this.stringify(k);
+    const arrayArg = (name: string, v: any): any[] => (isArray(v) ? v : fail(name, "expected array"));
+    const objectArg = (name: string, v: any): Map<string, any> => (isObject(v) ? v : fail(name, "expected object"));
+    const random = (): number => {
+      if (this.rngState === null) return Math.random();
+      // mulberry32: small, fast, good enough for games and tests; not cryptographic.
+      let t = (this.rngState = (this.rngState + 0x6d2b79f5) | 0);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
-    const ensureCallableValue = (name: string, v: any): PulsarCallable => {
-      if (this.isCallable(v)) return v as PulsarCallable;
-      throw this.createRuntimeError(mkNativeToken(name), `${name}: expected function`);
+    const parseIntStrict = (s: any, base: any): number | null => {
+      if (typeof s === "number") return Number.isInteger(s) ? s : null;
+      const b = num("parseInt", base);
+      if (!Number.isInteger(b) || b < 2 || b > 36) return null;
+      let text = str("parseInt", s).trim();
+      let sign = 1;
+      if (text.startsWith("+") || text.startsWith("-")) {
+        if (text[0] === "-") sign = -1;
+        text = text.slice(1);
+      }
+      if (text === "") return null;
+      let value = 0;
+      for (const ch of text.toLowerCase()) {
+        const d = ch >= "0" && ch <= "9" ? ch.charCodeAt(0) - 48 : ch >= "a" && ch <= "z" ? ch.charCodeAt(0) - 87 : 99;
+        if (d >= b) return null;
+        value = value * b + d;
+      }
+      return sign * value;
     };
-    const normalizeEnvelope = (token: string, channel: any, op: any, payload: any, deviceId?: any, processId?: any, nonce?: any, ts?: any): IPCEnvelope => {
-      const bridge = ensureIPC();
-      const dev = deviceId ?? this.ipcDefaults.deviceId ?? bridge.defaultDeviceId;
-      const proc = processId ?? this.ipcDefaults.processId ?? bridge.defaultProcessId;
-      if (!dev) throw this.createRuntimeError(mkNativeToken(token), `${token}: deviceId is required`);
-      if (!proc) throw this.createRuntimeError(mkNativeToken(token), `${token}: processId is required`);
-      const envelope: IPCEnvelope = {
+    const normalizeEnvelope = (name: string, channel: string, op: string, payload: any): IPCEnvelope => {
+      const bridge = ensureIPC(name);
+      const dev = this.ipcDefaults.deviceId ?? bridge.defaultDeviceId;
+      const proc = this.ipcDefaults.processId ?? bridge.defaultProcessId;
+      if (!dev) fail(name, "deviceId is required");
+      if (!proc) fail(name, "processId is required");
+      return {
         v: 1,
         deviceId: String(dev),
         processId: String(proc),
-        channel: String(channel),
-        op: String(op),
+        channel,
+        op,
         payload: toHost(payload),
-        nonce: typeof nonce === "string" && nonce.length > 0 ? nonce : this.generateNonce(),
-        ts: Number.isFinite(ts) ? Number(ts) : Date.now(),
+        nonce: this.generateNonce(),
+        ts: Date.now(),
       };
-      return envelope;
     };
-    const handleIPCResponse = (resp: IPCResponse | void, token: string) => {
+    const handleIPCResponse = (name: string, resp: IPCResponse | void) => {
       if (!resp) return null;
-      if (resp.error) {
-        const msg = resp.error.message ? `${resp.error.code}: ${resp.error.message}` : resp.error.code;
-        throw this.createRuntimeError(mkNativeToken(token), msg);
-      }
+      if (resp.error) fail(name, resp.error.message ? `${resp.error.code}: ${resp.error.message}` : resp.error.code);
       return fromHost(resp.result ?? null);
     };
 
-    // Core / Types
-    defineNative("typeOf", 1, (v) => typeName(v));
-
-    // Conversions
-    defineNative("number", 1, (v) => toNumber(v));
-    defineNative("string", 1, (v) => this.stringify(v));
-
-    // Time / Random
-    defineNative("clock", 0, () => Date.now());
-    defineNative("random", 0, () => Math.random());
-    defineNative("randomInt", 2, (min, max) => {
-      const a = Math.floor(Number(min));
-      const b = Math.floor(Number(max));
-      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-      const lo = Math.min(a, b), hi = Math.max(a, b);
-      return lo + Math.floor(Math.random() * (hi - lo + 1));
-    });
-
-    // Math
-    defineNative("abs", 1, (n) => Math.abs(requireNumber("abs", n)));
-    defineNative("floor", 1, (n) => Math.floor(requireNumber("floor", n)));
-    defineNative("ceil", 1, (n) => Math.ceil(requireNumber("ceil", n)));
-    defineNative("round", 1, (n) => Math.round(requireNumber("round", n)));
-    defineNative("sqrt", 1, (n) => Math.sqrt(requireNumber("sqrt", n)));
-    defineNative("pow", 2, (a, b) => Math.pow(requireNumber("pow", a), requireNumber("pow", b)));
-    defineNative("min", 2, (a, b) => Math.min(requireNumber("min", a), requireNumber("min", b)));
-    defineNative("max", 2, (a, b) => Math.max(requireNumber("max", a), requireNumber("max", b)));
-    defineNative("clamp", 3, (n, lo, hi) => {
-      const x = requireNumber("clamp", n), a = requireNumber("clamp", lo), b = requireNumber("clamp", hi);
-      return Math.min(Math.max(x, a), b);
-    });
-
-    // Strings
-    // Length of a string in Unicode code points, or of an array (SPEC §8).
-    defineNative("len", 1, (s) => {
-      if (isArray(s)) return s.length;
-      if (typeof s === "string") return [...s].length;
-      if (this.options.strictTypes) throw this.createRuntimeError(mkNativeToken("len"), "len: expected string or array");
-      return [...String(s)].length;
-    });
-    defineNative("toUpper", 1, (s) => requireString("toUpper", s).toUpperCase());
-    defineNative("toLower", 1, (s) => requireString("toLower", s).toLowerCase());
-    defineNative("trim", 1, (s) => requireString("trim", s).trim());
-    defineNative("indexOf", 2, (s, sub) => requireString("indexOf", s).indexOf(requireString("indexOf", sub)));
-    defineNative("substr", 3, (s, start, length) => {
-      const str = requireString("substr", s);
-      const iRaw = Number(start);
-      const lenRaw = Number(length);
-      if (!Number.isFinite(iRaw) || !Number.isFinite(lenRaw)) {
-        throw this.createRuntimeError({ type: TokenType.IDENTIFIER, lexeme: "substr", literal: null, line: 0 } as Token, "substr: start and length must be finite numbers");
-      }
-      const i = Math.floor(iRaw);
-      const len = Math.floor(lenRaw);
-      if (i < 0) {
-        throw this.createRuntimeError({ type: TokenType.IDENTIFIER, lexeme: "substr", literal: null, line: 0 } as Token, "substr: start index cannot be negative");
-      }
-      if (len < 0) {
-        throw this.createRuntimeError({ type: TokenType.IDENTIFIER, lexeme: "substr", literal: null, line: 0 } as Token, "substr: length cannot be negative");
-      }
-      if (i >= str.length) {
-        // Out of bounds start: return empty string (non-fatal) to mirror many languages
-        return "";
-      }
-      return str.substring(i, Math.min(str.length, i + len));
-    });
-
-    // Variadic concatenation of the printed forms of all arguments (same on the VM).
-    defineNative("concat", -1, (...args) => args.map((a) => this.stringify(a)).join(""));
-
-    // Arrays and objects (SPEC §3.3, §8). They are values: every function returns a new array
-    // or object and never changes its arguments. Mirrors the Go VM's implementations.
-    const requireArray = (name: string, v: any): any[] => {
-      if (isArray(v)) return v;
-      throw this.createRuntimeError(mkNativeToken(name), `${name}: expected array`);
+    // One implementation per hostapi.json entry (SPEC §8). Arity and argument types are checked
+    // from the registry before an implementation runs (see defineRegistered below).
+    const impls: Record<string, (...args: any[]) => any> = {
+      // Core / types
+      typeOf: (v) => typeName(v),
+      string: (v) => this.stringify(v),
+      number: (v) => toNumber(v),
+      concat: (...args) => args.map((a) => this.stringify(a)).join(""),
+      len: (v) => (isArray(v) ? v.length : codePoints(str("len", v)).length),
+      // Math
+      abs: (n) => Math.abs(num("abs", n)),
+      floor: (n) => Math.floor(num("floor", n)),
+      ceil: (n) => Math.ceil(num("ceil", n)),
+      round: (n) => Math.round(num("round", n)),
+      sqrt: (n) => Math.sqrt(num("sqrt", n)),
+      pow: (a, b) => Math.pow(num("pow", a), num("pow", b)),
+      min: (a, b) => Math.min(num("min", a), num("min", b)),
+      max: (a, b) => Math.max(num("max", a), num("max", b)),
+      clamp: (n, lo, hi) => Math.min(Math.max(num("clamp", n), num("clamp", lo)), num("clamp", hi)),
+      isInteger: (n) => typeof n === "number" && Number.isInteger(n),
+      isFinite: (n) => typeof n === "number" && Number.isFinite(n),
+      // Strings (indices and lengths count code points, like len)
+      toUpper: (s) => str("toUpper", s).toUpperCase(),
+      toLower: (s) => str("toLower", s).toLowerCase(),
+      trim: (s) => str("trim", s).trim(),
+      indexOf: (s, sub) => {
+        const text = str("indexOf", s);
+        const i = text.indexOf(str("indexOf", sub));
+        return i < 0 ? -1 : codePoints(text.slice(0, i)).length;
+      },
+      substr: (s, start, length) => {
+        const chars = codePoints(str("substr", s));
+        const i = Math.trunc(num("substr", start));
+        const n = Math.trunc(num("substr", length));
+        if (!Number.isFinite(i) || !Number.isFinite(n)) fail("substr", "start and length must be finite numbers");
+        if (i < 0) fail("substr", "start index cannot be negative");
+        if (n < 0) fail("substr", "length cannot be negative");
+        return chars.slice(i, i + n).join("");
+      },
+      // Parsing
+      parseInt: (s, base) => parseIntStrict(s, base),
+      parseFloat: (s) => {
+        if (typeof s === "number") return s;
+        const text = str("parseFloat", s).trim();
+        if (!RE_FLOAT.test(text)) return null;
+        const n = Number(text);
+        return Number.isFinite(n) ? n : null;
+      },
+      toNumberOr: (v, fallback) => toNumber(v) ?? fallback,
+      // Time / random
+      clock: () => Date.now(),
+      random: () => random(),
+      randomInt: (a, b) => {
+        const x = Math.trunc(num("randomInt", a));
+        const y = Math.trunc(num("randomInt", b));
+        const lo = Math.min(x, y);
+        const hi = Math.max(x, y);
+        return lo + Math.floor(random() * (hi - lo + 1));
+      },
+      randomSeed: (seed) => {
+        this.rngState = Math.trunc(num("randomSeed", seed)) | 0;
+        return null;
+      },
+      // Arrays and objects (SPEC §3.3): values; every function returns a new value.
+      arrayLen: (a) => arrayArg("arrayLen", a).length,
+      arrayPush: (a, ...values) => [...arrayArg("arrayPush", a), ...values],
+      arrayPop: (a) => {
+        const arr = arrayArg("arrayPop", a);
+        return arr.length === 0 ? null : arr[arr.length - 1];
+      },
+      arraySlice: (a, start, end) => {
+        const arr = arrayArg("arraySlice", a);
+        const lo = Math.max(0, Math.trunc(num("arraySlice", start)));
+        const hi = Math.min(arr.length, Math.trunc(num("arraySlice", end)));
+        return lo > hi ? [] : arr.slice(lo, hi);
+      },
+      arrayConcat: (...arrays) => arrays.flatMap((a) => arrayArg("arrayConcat", a)),
+      arrayIndexOf: (a, v) => arrayArg("arrayIndexOf", a).findIndex((x) => valuesEqual(x, v)),
+      objKeys: (o) => sortedKeys(objectArg("objKeys", o)),
+      objValues: (o) => {
+        const obj = objectArg("objValues", o);
+        return sortedKeys(obj).map((k) => obj.get(k));
+      },
+      objHas: (o, k) => objectArg("objHas", o).has(key(k)),
+      objGet: (o, k) => objectArg("objGet", o).get(key(k)) ?? null,
+      objSet: (o, k, v) => new Map(objectArg("objSet", o)).set(key(k), v),
+      // Handlers
+      registerHandler: (name, fnName) => {
+        const fn = this.globals.getOwn(str("registerHandler", fnName));
+        if (!(fn instanceof PulsarFunction)) fail("registerHandler", `handler function not found: ${fnName}`);
+        this.handlers.set(str("registerHandler", name), fn as PulsarFunction);
+        return null;
+      },
+      // Host: key-value store
+      kvGet: (k) => {
+        const io = ensureIO("kvGet");
+        if (!io.kvGet) fail("kvGet", "kv storage not available");
+        return fromHostResult(io.kvGet!(k));
+      },
+      kvSet: (k, v) => {
+        const io = ensureIO("kvSet");
+        if (!io.kvSet) fail("kvSet", "kv storage not available");
+        return fromHostResult(io.kvSet!(k, toHost(v)));
+      },
+      kvDelete: (k) => {
+        const io = ensureIO("kvDelete");
+        if (!io.kvDelete) fail("kvDelete", "kv storage not available");
+        return fromHostResult(io.kvDelete!(k));
+      },
+      // Host: sandboxed files
+      fsRead: (p) => fromHostResult(ensureIO("fsRead").readFile(p)),
+      fsWrite: (p, data) => fromHostResult(ensureIO("fsWrite").writeFile(p, this.stringify(data))),
+      fsList: (p) => fromHostResult(ensureIO("fsList").listDir(p)),
+      fsStat: (p) => {
+        const io = ensureIO("fsStat");
+        if (!io.stat) fail("fsStat", "not supported by this host");
+        return fromHostResult(io.stat!(p));
+      },
+      fsExists: (p) => {
+        const io = ensureIO("fsExists");
+        if (!io.exists) fail("fsExists", "not supported by this host");
+        return fromHostResult(io.exists!(p));
+      },
+      fsDelete: (p) => {
+        const io = ensureIO("fsDelete");
+        if (!io.deleteFile) fail("fsDelete", "not supported by this host");
+        return fromHostResult(io.deleteFile!(p));
+      },
+      // Host: events
+      emitEvent: (payload = null) => fromHost(ensureEvents("emitEvent").emit(toHost(payload)) ?? null),
+      pollEvent: () => fromHost(ensureEvents("pollEvent").poll() ?? null),
+      // Host: PulsarOS IPC
+      ipcSetContext: (deviceId, processId) => {
+        this.ipcDefaults.deviceId = deviceId;
+        this.ipcDefaults.processId = processId;
+        return null;
+      },
+      ipcSend: (channel, op, payload) => handleIPCResponse("ipcSend", ensureIPC("ipcSend").send(normalizeEnvelope("ipcSend", channel, op, payload))),
     };
-    const requireObject = (name: string, v: any): Map<string, any> => {
-      if (isObject(v)) return v;
-      throw this.createRuntimeError(mkNativeToken(name), `${name}: expected object`);
-    };
-    const requireIndex = (name: string, v: any): number => {
-      if (typeof v !== "number") throw this.createRuntimeError(mkNativeToken(name), `${name}: start and end must be numbers`);
-      return Math.trunc(v);
-    };
-    const key = (k: any): string => this.stringify(k);
-    defineNative("arrayLen", 1, (a) => requireArray("arrayLen", a).length);
-    defineNative("arrayPush", -1, (a, ...values) => {
-      if (values.length === 0) throw this.createRuntimeError(mkNativeToken("arrayPush"), "arrayPush: expected an array and at least one value");
-      return [...requireArray("arrayPush", a), ...values];
-    });
-    defineNative("arrayPop", 1, (a) => {
-      const arr = requireArray("arrayPop", a);
-      return arr.length === 0 ? null : arr[arr.length - 1];
-    });
-    defineNative("arraySlice", 3, (a, start, end) => {
-      const arr = requireArray("arraySlice", a);
-      const lo = Math.max(0, requireIndex("arraySlice", start));
-      const hi = Math.min(arr.length, requireIndex("arraySlice", end));
-      return lo > hi ? [] : arr.slice(lo, hi);
-    });
-    defineNative("arrayConcat", -1, (...arrays) => {
-      if (arrays.length < 2) throw this.createRuntimeError(mkNativeToken("arrayConcat"), "arrayConcat: expected at least 2 arrays");
-      return arrays.flatMap((a) => requireArray("arrayConcat", a));
-    });
-    defineNative("arrayIndexOf", 2, (a, v) => requireArray("arrayIndexOf", a).findIndex((x) => valuesEqual(x, v)));
-    defineNative("objKeys", 1, (o) => sortedKeys(requireObject("objKeys", o)));
-    defineNative("objValues", 1, (o) => {
-      const obj = requireObject("objValues", o);
-      return sortedKeys(obj).map((k) => obj.get(k));
-    });
-    defineNative("objHas", 2, (o, k) => requireObject("objHas", o).has(key(k)));
-    defineNative("objGet", 2, (o, k) => requireObject("objGet", o).get(key(k)) ?? null);
-    defineNative("objSet", 3, (o, k, v) => new Map(requireObject("objSet", o)).set(key(k), v));
 
-    // Safe parsing utilities
-    defineNative("parseInt", 2, (s, base) => {
-      if (typeof s === 'number') return Number.isInteger(s) ? s : null;
-      const b = requireNumber("parseInt", base);
-      if (!(b >= 2 && b <= 36)) return null;
-      const str = requireString("parseInt", s).trim();
-      const regex = b === 10 ? RE_INTEGER_BASE10 : RE_INTEGER_OTHER;
-      if (!regex.test(str)) return null;
-      const n = parseInt(str, b);
-      return Number.isNaN(n) ? null : n;
-    });
-    defineNative("parseFloat", 1, (s) => {
-      if (typeof s === 'number') return s;
-      const str = requireString("parseFloat", s).trim();
-      // Strict float: no trailing junk
-      if (!RE_FLOAT.test(str)) return null;
-      const n = Number(str);
-      return Number.isFinite(n) ? n : null;
-    });
-    defineNative("toNumberOr", 2, (s, def) => {
-      if (typeof s === 'number') return s;
-      if (typeof s === 'boolean') return s ? 1 : 0;
-      if (typeof s === 'string') {
-        const n = Number(s);
-        return Number.isNaN(n) ? def : n;
-      }
-      return def;
-    });
-    defineNative("isInteger", 1, (n) => typeof n === 'number' && Number.isInteger(n));
-    defineNative("isFinite", 1, (n) => typeof n === 'number' && Number.isFinite(n));
-
-    // IPC helpers
-    defineNative("ipcNonce", 0, () => this.generateNonce());
-    defineNative("ipcSetContext", 2, (deviceId, processId) => {
-      if (deviceId !== null && deviceId !== undefined) {
-        this.ipcDefaults.deviceId = requireString("ipcSetContext", deviceId);
-      }
-      if (processId !== null && processId !== undefined) {
-        this.ipcDefaults.processId = requireString("ipcSetContext", processId);
-      }
-      return null;
-    });
-    defineNative("ipcEnvelope", -1, (channel, op, payload, deviceId?, processId?, nonce?, ts?) => {
-      return fromHost(normalizeEnvelope("ipcEnvelope", channel, op, payload, deviceId, processId, nonce, ts));
-    });
-    defineNative("ipcSend", -1, (channel, op, payload, deviceId?, processId?, nonce?, ts?) => {
-      const env = normalizeEnvelope("ipcSend", channel, op, payload, deviceId, processId, nonce, ts);
-      const resp = ensureIPC().send(env);
-      return handleIPCResponse(resp, "ipcSend");
-    });
-    defineNative("ipcSendRaw", 1, (raw) => {
-      if (raw === null || typeof raw !== "object" || isArray(raw)) {
-        throw this.createRuntimeError(mkNativeToken("ipcSendRaw"), "ipcSendRaw: envelope object required");
-      }
-      const envObj = toHost(raw) as Partial<IPCEnvelope>;
-      if (!envObj.channel || !envObj.op) {
-        throw this.createRuntimeError(mkNativeToken("ipcSendRaw"), "ipcSendRaw: channel and op are required");
-      }
-      const env = normalizeEnvelope("ipcSendRaw", envObj.channel, envObj.op, envObj.payload, envObj.deviceId, envObj.processId, envObj.nonce, envObj.ts);
-      env.v = envObj.v ?? env.v;
-      const resp = ensureIPC().send(env);
-      return handleIPCResponse(resp, "ipcSendRaw");
-    });
-    defineNative("ipcSendAsync", -1, (channel, op, payload, onResult?, onError?, deviceId?, processId?, nonce?, ts?) => {
-      const env = normalizeEnvelope("ipcSendAsync", channel, op, payload, deviceId, processId, nonce, ts);
-      const bridge = ensureIPC();
-      const resultCb = onResult !== undefined && onResult !== null ? ensureCallableValue("ipcSendAsync", onResult) : null;
-      const errorCb = onError !== undefined && onError !== null ? ensureCallableValue("ipcSendAsync", onError) : null;
-      const handle = (resp: IPCResponse | void) => {
-        if (resp && resp.error && errorCb) {
-          errorCb.call(this, [fromHost(resp.error)]);
-          return;
-        }
-        const val = resp ? fromHost(resp.result ?? null) : null;
-        if (resultCb) {
-          resultCb.call(this, [val]);
-        }
+    // The registry is the contract: every entry needs an implementation and nothing else is
+    // exposed, so the interpreter cannot drift from the compiler and the VM (D5).
+    for (const name of Object.keys(impls)) {
+      if (!lookupHostFunction(name)) throw new Error(`Interpreter implements '${name}', which is not in hostapi.json`);
+    }
+    for (const fn of HOST_FUNCTIONS) {
+      const impl = impls[fn.name];
+      if (!impl) throw new Error(`hostapi.json entry '${fn.name}' has no interpreter implementation`);
+      const { min, max } = arityRange(fn);
+      const native: PulsarCallable = {
+        arity: () => (min === max ? min : -1),
+        call: (_: Interpreter, args: any[]) => {
+          const arity = arityError(fn, args.length);
+          if (arity) throw this.createRuntimeError(nativeToken(fn.name), arity);
+          if (this.options.strictTypes) this.checkArgTypes(fn, args, nativeToken(fn.name));
+          return impl(...args);
+        },
+        toString: () => `<native ${fn.name}>`,
       };
-      const handleErr = (err: any) => {
-        if (errorCb) {
-          const errVal = this.errorToValue(err);
-          errorCb.call(this, [errVal]);
-        } else {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw this.createRuntimeError(mkNativeToken("ipcSendAsync"), msg);
-        }
-      };
-      if (typeof bridge.sendAsync === "function") {
-        bridge.sendAsync(env).then(handle).catch(handleErr);
-      } else {
-        try {
-          const resp = bridge.send(env);
-          handle(resp);
-        } catch (err) {
-          handleErr(err);
-        }
+      this.globals.define(fn.name, native);
+    }
+  }
+
+  /** Argument kinds from hostapi.json, as the Go VM checks them. */
+  private checkArgTypes(fn: HostFunction, args: any[], token: Token): void {
+    args.forEach((arg, i) => {
+      const param = fn.params[Math.min(i, fn.params.length - 1)];
+      if (!param || param.type === "any") return;
+      const kind = KIND_OF(arg);
+      if (!param.type.split("|").includes(kind)) {
+        throw this.createRuntimeError(token, `${fn.name}: argument ${i + 1} (${param.name}) must be ${param.type.replace(/\|/g, " or ")}, got ${kind}`);
       }
-      return null;
-    });
-
-    // Error handling helpers
-    defineNative("tryCatch", 2, (fn, handler) => {
-      const f = ensureCallableValue("tryCatch", fn);
-      const h = ensureCallableValue("tryCatch", handler);
-      try {
-        return f.call(this, []);
-      } catch (err) {
-        const errVal = this.errorToValue(err);
-        return h.call(this, [errVal]);
-      }
-    });
-
-    // Module system
-    defineNative("importModule", 1, (name) => loadModule(name));
-    defineNative("registerModule", 2, (name, exports) => {
-      const key = requireString("registerModule", name);
-      this.moduleCache.set(key, exports);
-      return null;
-    });
-
-    // Sandboxed IO (host provided)
-    defineNative("fsRead", 1, (path) => {
-      const io = ensureIO();
-      const p = requireString("fsRead", path);
-      return wrapPromise(io.readFile(p));
-    });
-    defineNative("fsWrite", 2, (path, data) => {
-      const io = ensureIO();
-      const p = requireString("fsWrite", path);
-      const payload = data === null || data === undefined ? "" : this.stringify(data);
-      return wrapPromise(io.writeFile(p, payload));
-    });
-    defineNative("fsList", 1, (path) => {
-      const io = ensureIO();
-      const p = requireString("fsList", path);
-      return wrapPromise(io.listDir(p));
-    });
-    defineNative("kvGet", 1, (key) => {
-      const io = ensureIO();
-      if (!io.kvGet) throw this.createRuntimeError(mkNativeToken("kvGet"), "kv storage not available");
-      const k = requireString("kvGet", key);
-      return wrapPromise(io.kvGet(k));
-    });
-    defineNative("kvSet", 2, (key, value) => {
-      const io = ensureIO();
-      if (!io.kvSet) throw this.createRuntimeError(mkNativeToken("kvSet"), "kv storage not available");
-      const k = requireString("kvSet", key);
-      return wrapPromise(io.kvSet(k, toHost(value)));
-    });
-    defineNative("kvDelete", 1, (key) => {
-      const io = ensureIO();
-      if (!io.kvDelete) throw this.createRuntimeError(mkNativeToken("kvDelete"), "kv storage not available");
-      const k = requireString("kvDelete", key);
-      return wrapPromise(io.kvDelete(k));
     });
   }
 
+  /** Names registered with registerHandler, for embedders (SPEC §9). */
+  handlerNames(): string[] {
+    return [...this.handlers.keys()];
+  }
+
+  /** Invokes a registered handler with fresh budgets; throws RuntimeError or BudgetError. */
+  callHandler(name: string, args: any[] = []): any {
+    const fn = this.handlers.get(name);
+    if (!fn) throw new Error(`handler not found: ${name}`);
+    if (fn.arity() !== args.length) throw new Error(`handler ${name} expects ${fn.arity()} args, got ${args.length}`);
+    this.resetBudget();
+    return fn.call(this, args.map(fromHost));
+  }
+
+  private resetBudget(): void {
+    this.steps = 0;
+    this.deadline = this.limits.timeoutMs > 0 && Number.isFinite(this.limits.timeoutMs) ? Date.now() + this.limits.timeoutMs : Infinity;
+  }
+
+  /** Counts one step and enforces the step and time budgets (D10). */
+  private tick(): void {
+    this.steps++;
+    const max = this.limits.maxSteps;
+    if (max > 0 && this.steps > max) throw new BudgetError("step budget exceeded");
+    if ((this.steps & 1023) === 0 && Date.now() > this.deadline) throw new BudgetError("time budget exceeded");
+  }
+
+  /** Called on every user-function call; recursion past maxCallDepth is a catchable runtime error. */
+  enterCall(token: Token, frame: CallFrame): void {
+    const max = this.limits.maxCallDepth;
+    if (max > 0 && this.callStack.length >= max) {
+      throw this.createRuntimeError(token, `Stack overflow (more than ${max} nested calls).`);
+    }
+    this.tick();
+    this.callStack.push(frame);
+  }
+
   interpret(statements: Stmt[]): void {
+    this.resetBudget();
     try {
       // Hoist top-level functions so they can be called before their declaration (SPEC 4.6, D2).
       for (const statement of statements) {
@@ -609,6 +571,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
 
   visitWhileStmt(stmt: WhileStmt): void {
     while (this.isTruthy(this.evaluate(stmt.condition))) {
+      this.tick();
       this.execute(stmt.body);
     }
   }
@@ -627,6 +590,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
 
       // Loop while condition is truthy (or forever if no condition)
       while (stmt.condition === null || this.isTruthy(this.evaluate(stmt.condition))) {
+        this.tick();
         this.execute(stmt.body);
 
         // Execute increment (if present)
@@ -823,8 +787,8 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     try {
       this.executeBlock(stmt.tryBlock, new Environment(this.environment));
     } catch (err) {
-      // `return` inside try is not an error (D19).
-      if (err instanceof ReturnException) throw err;
+      // `return` inside try is not an error (D19), and budgets cannot be caught (D10).
+      if (err instanceof ReturnException || err instanceof BudgetError) throw err;
       const env = new Environment(this.environment);
       if (stmt.catchParam) {
         env.define(stmt.catchParam, this.errorToValue(err));
@@ -850,10 +814,6 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     }
   }
 
-  pushCallFrame(frame: CallFrame): void {
-    this.callStack.push(frame);
-  }
-
   popCallFrame(): void {
     this.callStack.pop();
   }
@@ -863,6 +823,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   private execute(stmt: Stmt): void {
+    this.tick();
     stmt.accept(this);
   }
 

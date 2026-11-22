@@ -1,0 +1,12 @@
+// randomInt includes both bounds (SPEC 8).
+randomSeed(1);
+var lo = false;
+var hi = false;
+var inRange = true;
+for (var i = 0; i < 300; i = i + 1) {
+  var r = randomInt(1, 3);
+  if (r == 1) { lo = true; }
+  if (r == 3) { hi = true; }
+  if (r < 1 || r > 3 || !isInteger(r)) { inRange = false; }
+}
+print(lo && hi && inRange);

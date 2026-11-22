@@ -11,4 +11,7 @@ export interface IOBridge {
   kvGet?(key: string): unknown | Promise<unknown>;
   kvSet?(key: string, value: unknown): boolean | Promise<boolean>;
   kvDelete?(key: string): boolean | Promise<boolean>;
+  stat?(path: string): unknown | Promise<unknown>;
+  exists?(path: string): boolean | Promise<boolean>;
+  deleteFile?(path: string): boolean | Promise<boolean>;
 }

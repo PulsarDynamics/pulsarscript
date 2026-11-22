@@ -59,14 +59,17 @@ go run ./cmd/vmrun -inspect script.json
 - ✅ Try/catch exception handling
 - ✅ Arrays: `[1, 2, 3]`, array host calls
 - ✅ Objects: `{name: "value"}`, object host calls  
-- ✅ 40+ host calls (math, filesystem, KV, IPC, events)
+- ✅ 54 built-ins and host calls, listed in [`hostapi.json`](hostapi.json) (SPEC §8); unknown names fail at compile time
 - ✅ Source mapping for error line numbers
-- ✅ Configurable stack/memory limits
+- ✅ Default step, time and call-depth budgets (SPEC §7)
 
-Host bridges:
-- `ipc`: `{ send(envelope), sendAsync?(envelope), defaultDeviceId?, defaultProcessId? }`
-- `io`: `{ readFile, writeFile, listDir, kvGet?, kvSet?, kvDelete? }`
-- Modules: pass `modules` map or `moduleLoader` in `Interpreter` options.
+Interpreter options (`new Interpreter({...})`, `runSource(src, {...})`):
+- `ipc`: `{ send(envelope), defaultDeviceId?, defaultProcessId? }`
+- `io`: `{ readFile, writeFile, listDir, kvGet?, kvSet?, kvDelete?, stat?, exists?, deleteFile? }`
+- `events`: `{ emit(payload), poll() }`
+- `limits`: `{ maxSteps, timeoutMs, maxCallDepth }` (defaults 10,000,000 / 10,000 ms / 256; `0` or `Infinity` lifts one)
+
+Handlers registered with `registerHandler(name, fn)` can be called from TypeScript with `interpreter.callHandler(name, args)`.
 
 ## Usage
 

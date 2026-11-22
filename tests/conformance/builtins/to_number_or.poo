@@ -1,0 +1,4 @@
+print(toNumberOr("", 5));
+print(toNumberOr("2.5", 5));
+print(toNumberOr(true, 0));
+print(toNumberOr([1], "x"));

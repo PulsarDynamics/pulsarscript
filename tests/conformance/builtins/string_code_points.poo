@@ -1,0 +1,4 @@
+print(indexOf("héllo", "l"));
+print(substr("héllo", 1, 3));
+print(toUpper("héllo"));
+print(substr("abc", 5, 1));

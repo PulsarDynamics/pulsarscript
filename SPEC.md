@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0.2 records the language **as it behaves today** (November 2026; D1, D2, D4, D6, D7, D13–D17 and D19 fixed, D3 in part). v0.2 settles the value model: arrays and objects are values, `+` concatenates with strings, and `catch` binds an error object. Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.3 records the language **as it behaves today** (November 2026; D1–D7, D9, D10, D13–D17 and D19 fixed). v0.2 settled the value model; v0.3 makes `hostapi.json` the one registry of built-ins and host calls (§8), so unknown functions fail at compile time, and bounds every run by default (§7). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -133,11 +133,12 @@ Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`;
 
 ### 4.6 Calls
 
-`name(arg, …)` calls a user function declared with `function` or a built-in (§8). At most 255 arguments. Only identifiers can be called.
+`name(arg, …)` calls a user function declared with `function` or a function in the registry (§8). At most 255 arguments. Only identifiers can be called. A user function with the same name as a built-in takes precedence.
+
+**Calls are resolved at compile time.** A name that is neither a user function nor in the registry is a compile-time error (`Unknown function 'x'.`), and so is a wrong argument count for a built-in. Argument *types* are checked when the call runs. (Fixed in D3: unknown names used to compile as host calls that failed at runtime, where `try`/`catch` could swallow them.)
 
 **Top-level functions are hoisted:** a call resolves to any function declared at the top level of the file, including one declared later and including calls made before the declaration. Functions declared inside a block are callable after their declaration within that block. (Fixed in D2.)
 
-> ⚠ **D3**: on the `vm`, calling an unknown function name is only detected at runtime ("hostcall … not allowed"), where `try`/`catch` can catch it. It must be a compile-time error; this needs the host-call registry (Phase 1, A3). Unknown *variable* names are already compile-time errors on both runtimes.
 
 ## 5. Statements
 
@@ -174,7 +175,7 @@ A syntax error stops compilation. The parser recovers after each error so that *
 | --- | --- | --- |
 | Lexical | unexpected character, unterminated string | compilation fails |
 | Syntax | grammar violation | compilation fails; all syntax errors are reported |
-| Semantic | undefined variable, assignment to an undeclared name, duplicate declaration | compile-time on both runtimes (unknown *function* names: runtime on the `vm`, ⚠ **D3**) |
+| Semantic | undefined variable, assignment to an undeclared name, duplicate declaration, unknown function, wrong argument count for a built-in | compilation fails (both runtimes run the same analyzer) |
 | Runtime | type errors, division by zero, unknown host call, stack overflow, budget exceeded | unwinds to the nearest `try`; uncaught, the program stops with a message and source line |
 
 `try { A } catch (e) { B }`: if a runtime error occurs in `A`, including inside any function called from `A`, the calls are unwound and execution continues in `B` with `e` bound to the error. Errors that occur before execution (lexical, syntax, semantic) cannot be caught, and neither can running out of the step or time budget.
@@ -193,44 +194,106 @@ try { var x = 1 / 0; } catch (e) { print(objGet(e, "kind") + " at line " + objGe
 
 `return` inside `try` returns from the function normally; it is not caught, and it leaves no handler behind. (Fixed in D19: `interp` caught `return` as an error, and the `vm` kept the handler of a function that returned from inside `try` and did not unwind calls made inside `try`.)
 
-**Limits.** Recursion beyond the call-depth limit is a runtime error (`vm`: 256 frames by default; stack depth 1024). Every execution must have a step and time budget.
+**Limits.** Every execution is bounded by default (fixed in D10; `while (true) {}` used to hang `vmrun` and `runSource`):
 
-> ⚠ **D10**: `vmrun` and `interp`/`runSource` have no default budget, so `while (true) {}` hangs. The PulsarOS runtime manager does apply budgets.
+| Limit | Default | When exceeded | Configure |
+| --- | --- | --- | --- |
+| Call depth | 256 nested calls | runtime error, **catchable** | `VMConfig.MaxCallDepth`; `limits.maxCallDepth` |
+| Stack depth (`vm`) | 1024 values | runtime error, catchable | `VMConfig.MaxStackDepth`; `vmrun -max-stack` |
+| Steps | 10,000,000 | stops the program: `step budget exceeded`, **not catchable** | `VMConfig.MaxSteps`; `vmrun -max-steps`; `limits.maxSteps` |
+| Wall time | 10 s | stops the program: `time budget exceeded`, **not catchable** | `VMConfig.MaxDuration`; `vmrun -timeout`; `limits.timeoutMs` |
+
+A `vm` step is one bytecode instruction; an `interp` step is one statement, loop iteration or call, so the two counts are only roughly comparable. A budget applies to one run: `Run`/`interpret`, or one handler call. Hosts that run untrusted code set tighter budgets per call: the PulsarOS runtime manager uses 500,000 steps / 2 s to initialise a script and 250,000 steps / 1.5 s per RPC handler. Lifting a limit takes an explicit opt-out (`-max-steps 0`, `-timeout 0`, a negative `VMConfig` value, or `0`/`Infinity` in `limits`).
 
 ## 8. Built-in functions and host calls
 
-Built-ins are called like functions. On the `vm` each call is a `HOST_CALL` checked against a whitelist (name, arity, argument kinds). On `interp` they are native functions.
+Every function a script can call without declaring it is listed in **`hostapi.json`**, the registry shared by the compiler, the analyzer, the interpreter and the Go VM (decision A3; fixed D5, where each runtime kept its own list). An entry gives the name, the parameters with their types, the return type and, for host calls, the capability it will require (decision A4, not enforced yet).
 
-> ⚠ **D5**: the two runtimes still implement **different sets**: the math, string-utility, parsing and clock built-ins are not allowed on the `vm`, and the analyzer rejects the host-defined `kv*`/`fs*`/`ipc*` names on `interp`. Phase 1 replaces both lists with one registry (`hostapi.yaml`). Until then, portable scripts should use only the ✓/✓ rows.
+- **Core** functions are pure and implemented inside every runtime, so they behave the same on every host.
+- **Host** functions are supplied by the embedding host (the PulsarOS API's script manager, `host.ts` bridges, or `vmrun -sandbox-root` for `fsRead`/`fsWrite`/`fsList`/`fsExists`). A host that does not provide one raises a runtime error when it is called; `vmrun` alone returns `nil`.
 
-Results measured with `interp` (through the analyzer, as `runSource` does) and `vmrun` built from pulsaros-api `master` with `phase1/vm-semantics`. The pure core built-ins (`typeOf`, `string`, `concat`, `number`, `abs`, `clamp`, `len`, `array*`, `obj*`) are implemented inside the VM, so every host gets them:
+Host calls are encapsulated in three layers:
 
-| Built-in | `interp` | `vm` | Behaviour |
+1. **Compile time:** the analyzer and the compiler resolve each call. Unknown names and wrong argument counts are compile errors (§4.6).
+2. **Load time:** the VM verifies a module before running it: every opcode is known, and every `HOST_CALL` names a registry entry with a valid argument count. Hand-written or stale bytecode that calls anything else is rejected with `invalid module: unknown host call …`.
+3. **Call time:** argument types are checked against the registry. Core calls run inside the VM; only host entries reach the host's `HostCall` callback.
+
+To add a built-in: add the entry to `hostapi.json`, implement it in `Interpreter.ts` (core or host) and, for core, in `pulsarscriptvm/builtins.go`, copy `hostapi.json` into pulsaros-api, add conformance cases, and run `bun run gen:hostapi` to refresh the table below. Tests on both sides fail if an entry has no implementation or an implementation has no entry.
+
+Notes on the core functions:
+- String indices and lengths (`len`, `indexOf`, `substr`) count Unicode code points.
+- `round` rounds halves up (toward +Infinity) as JavaScript does, so `round(-2.5)` is `-2`.
+- `parseInt` and `parseFloat` parse the **whole** string: `parseInt("19", 8)` and `parseInt("12px", 10)` are `nil`.
+- `randomInt(a, b)` includes both bounds. After `randomSeed(n)` the sequence repeats on the same runtime, but the two runtimes use different generators.
+- `toUpper`/`toLower` use simple case mapping; characters whose case changes length (such as `ß`) may differ between runtimes.
+- `loadModule` was removed from the registry because no host implemented it (D8). Modules come back as registry entries in Phase 3.
+
+<!-- hostapi:begin (generated by scripts/gen-hostapi-docs.ts; do not edit) -->
+
+**Core** (implemented by every runtime; no host needed):
+
+| Function | Parameters | Returns | Behaviour |
 | --- | --- | --- | --- |
-| `typeOf(v)` | ✓ | ✓ | type name (§3) |
-| `string(v)` | ✓ | ✓ | printed form (§3.2) |
-| `len(v)` | ✓ | ✓ | length of a string in Unicode code points (`len("héllo")` is 5), or of an array |
-| `concat(…)` | ✓ | ✓ | joins the printed forms of all arguments |
-| `randomInt(a, b)` | ✓ | ✓ | integer in `[a, b]` |
-| `number(v)` | ✓ | ✓ | numbers as-is; `true`/`false` → `1`/`0`; a string that is a decimal literal (optional sign, fraction and exponent, surrounding whitespace) → that number; anything else, including `""`, `"0x10"` and `"12px"`, → `nil` |
-| `abs(n)`, `clamp(n, lo, hi)` | ✓ | ✓ | |
-| `floor` `ceil` `round` `sqrt` `pow` `min` `max` | ✓ | not allowed | |
-| `toUpper` `toLower` `trim` `indexOf` `substr` | ✓ | not allowed | |
-| `parseInt` `parseFloat` `toNumberOr` `isInteger` `isFinite` | ✓ | not allowed | |
-| `clock()` `random()` | ✓ | not allowed | |
-| `arrayLen(a)` `arrayPush(a, v, …)` `arrayPop(a)` | ✓ | ✓ | value semantics (§3.3): `arrayPush` returns a new array; `arrayPop` returns the last element or `nil` |
-| `arraySlice(a, start, end)` | ✓ | ✓ | elements `start` up to `end` (exclusive); indices truncate toward zero and clamp to the array; `start > end` gives `[]` |
-| `arrayConcat(a, b, …)` `arrayIndexOf(a, v)` | ✓ | ✓ | `arrayIndexOf` uses `==` (§4.3); `-1` when absent |
-| `objKeys(o)` `objValues(o)` | ✓ | ✓ | in sorted key order |
-| `objHas(o, k)` `objGet(o, k)` `objSet(o, k, v)` | ✓ | ✓ | `k` is converted with `string()`; `objGet` gives `nil` for a missing key; `objSet` returns a new object |
-| `kvGet` `kvSet` `kvDelete` | rejected by analyzer | host-defined | key-value store provided by the host |
-| `fsRead` `fsWrite` `fsList` `fsStat` `fsDelete` `fsExists` | rejected by analyzer | host-defined | sandboxed file access provided by the host |
-| `emitEvent` `pollEvent` | — | host-defined | event queue |
-| `ipcSetContext` `ipcSend` | rejected by analyzer | host-defined | PulsarOS IPC; subject to the app's channel permissions |
-| `registerHandler(name, fn)` | — | ✓ | registers an exported handler (inspect mode) |
-| `loadModule(name)` | — | whitelisted, no effect | ⚠ **D8** |
+| `typeOf(value)` | value: any | string | Type name: nil, number, string, boolean, array or object. |
+| `string(value)` | value: any | string | Printed form of a value (§3.2). |
+| `number(value)` | value: any | number\|nil | Numbers as-is; true/false to 1/0; a decimal-literal string to its number; anything else to nil. |
+| `concat(…parts)` | parts: any | string | Joins the printed forms of all arguments. |
+| `len(value)` | value: string \| array | number | Length of a string in Unicode code points, or of an array. |
+| `abs(n)` | n: number | number | Absolute value. |
+| `floor(n)` | n: number | number | Largest integer not greater than n. |
+| `ceil(n)` | n: number | number | Smallest integer not less than n. |
+| `round(n)` | n: number | number | Nearest integer; halves round up (toward +Infinity), as in JavaScript. |
+| `sqrt(n)` | n: number | number | Square root; NaN for negative n. |
+| `pow(base, exponent)` | base: number, exponent: number | number | base raised to exponent. |
+| `min(a, b)` | a: number, b: number | number | Smaller of a and b. |
+| `max(a, b)` | a: number, b: number | number | Larger of a and b. |
+| `clamp(n, lo, hi)` | n: number, lo: number, hi: number | number | min(max(n, lo), hi). |
+| `isInteger(value)` | value: any | boolean | True for a number with no fractional part. |
+| `isFinite(value)` | value: any | boolean | True for a number that is not NaN or ±Infinity. |
+| `toUpper(s)` | s: string | string | Upper case (Unicode simple case mapping). |
+| `toLower(s)` | s: string | string | Lower case (Unicode simple case mapping). |
+| `trim(s)` | s: string | string | Removes leading and trailing whitespace. |
+| `indexOf(s, sub)` | s: string, sub: string | number | Code-point index of the first occurrence of sub, or -1. |
+| `substr(s, start, length)` | s: string, start: number, length: number | string | Up to length code points from start (both truncated toward zero; negative values are errors). |
+| `parseInt(s, base)` | s: string \| number, base: number | number\|nil | Whole string as an integer in base 2-36 (optional sign, surrounding whitespace); nil if any character is not a digit of the base. |
+| `parseFloat(s)` | s: string \| number | number\|nil | Whole string as a decimal number without exponent; nil otherwise. |
+| `toNumberOr(value, fallback)` | value: any, fallback: any | any | number(value), or fallback when that is nil. |
+| `clock()` | — | number | Milliseconds since the Unix epoch. |
+| `random()` | — | number | Pseudo-random number in [0, 1). |
+| `randomInt(a, b)` | a: number, b: number | number | Pseudo-random integer in [min(a, b), max(a, b)], bounds truncated toward zero. |
+| `randomSeed(seed)` | seed: number | nil | Seeds random and randomInt so a run is repeatable on the same runtime. |
+| `arrayLen(a)` | a: array | number | Number of elements. |
+| `arrayPush(a, …values)` | a: array, values: any | array | New array with values appended. |
+| `arrayPop(a)` | a: array | any | Last element, or nil when empty. Does not change a. |
+| `arraySlice(a, start, end)` | a: array, start: number, end: number | array | Elements from start up to end (exclusive); indices truncated and clamped; start > end gives []. |
+| `arrayConcat(a, …rest)` | a: array, rest: array | array | New array joining all arguments. |
+| `arrayIndexOf(a, value)` | a: array, value: any | number | Index of the first element == value, or -1. |
+| `objKeys(o)` | o: object | array | Keys in sorted order. |
+| `objValues(o)` | o: object | array | Values in sorted key order. |
+| `objHas(o, key)` | o: object, key: any | boolean | Whether string(key) is a key of o. |
+| `objGet(o, key)` | o: object, key: any | any | Value at string(key), or nil. |
+| `objSet(o, key, value)` | o: object, key: any, value: any | object | New object with string(key) set to value. |
+| `registerHandler(name, functionName)` | name: string, functionName: string | nil | Exposes a top-level function to the host under name. |
 
-"Host-defined" means the embedding host (the PulsarOS API's script manager, or `vmrun` with `-sandbox-root`) supplies the behaviour; `vmrun` alone returns `nil` or `false`.
+**Host** (supplied by the embedding host; `vmrun` alone returns `nil`):
+
+| Function | Parameters | Returns | Capability | Behaviour |
+| --- | --- | --- | --- | --- |
+| `kvGet(key)` | key: string | any | `kv` | Value stored under key, or nil. |
+| `kvSet(key, value)` | key: string, value: any | any | `kv` | Stores value under key. |
+| `kvDelete(key)` | key: string | any | `kv` | Removes key. |
+| `fsRead(path)` | path: string | string\|nil | `fs.read` | File contents, or nil. |
+| `fsList(path)` | path: string | array | `fs.read` | Directory entries. |
+| `fsStat(path)` | path: string | object\|nil | `fs.read` | Entry metadata, or nil. |
+| `fsExists(path)` | path: string | boolean | `fs.read` | Whether path exists. |
+| `fsWrite(path, content)` | path: string, content: any | boolean | `fs.write` | Writes string(content) to path. |
+| `fsDelete(path)` | path: string | boolean | `fs.write` | Deletes path. |
+| `emitEvent(payload?)` | payload: any | any | `events` | Sends an event to the host. |
+| `pollEvent()` | — | any | `events` | Next queued event, or nil. |
+| `ipcSetContext(deviceId, processId)` | deviceId: string, processId: string | nil | `ipc` | Sets the device and process used by ipcSend. |
+| `ipcSend(channel, op, payload)` | channel: string, op: string, payload: any | any | `ipc` | Sends a PulsarOS IPC message; subject to the app's allowed channels and operations. |
+
+<!-- hostapi:end -->
 
 ## 9. Programs, handlers and the host
 
@@ -249,7 +312,8 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 - `code` is a flat array of opcode numbers, each followed by its operands. The opcode numbers are fixed by `Bytecode.ts`, mirrored in Go and pinned by a snapshot test; changing a number is a breaking format change.
 - Operand counts: 1 for `CONST`, `DEFINE_GLOBAL`, `GET_GLOBAL`, `SET_GLOBAL`, `GET_LOCAL`, `SET_LOCAL`, `JUMP`, `JUMP_IF_FALSE`, `ENTER_BLOCK`, `EXIT_BLOCK`, `TRY_PUSH`, `NEW_ARRAY`, `NEW_OBJECT`; **2** for `CALL` (address, argument count) and `HOST_CALL` (name constant, argument count); 0 for the rest.
 
-> ⚠ **D9**: `vmrun -disasm` decodes `CALL` with one operand, so listings drift after the first call.
+- Opcode names and operand counts live in one table in the VM (`OpcodeName`), used by the loader's verifier, `vmrun -disasm` and step mode. (Fixed in D9: the disassembler used to decode `CALL` with one operand.)
+- `LoadModule` verifies the code before it runs (§8, load time).
 
 - Top-level variables use `DEFINE_GLOBAL` / `GET_GLOBAL` / `SET_GLOBAL`; all other variables use local slots.
 
@@ -271,14 +335,14 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 | --- | --- | --- | --- |
 | D1 | Top-level variables compiled as locals; functions could not see globals | vm (interp: globals declared later) | **Fixed** |
 | D2 | Calls to functions declared later failed | both | **Fixed** |
-| D3 | Unknown names not caught at compile time | vm | **Partly fixed**: variables and assignments done; unknown function names need the host-call registry (Phase 1) |
+| D3 | Unknown names not caught at compile time | vm | **Fixed** (v0.3): calls resolve against `hostapi.json`; the VM also rejects unknown host calls at load |
 | D4 | Array and object literals unsupported | interp | **Fixed** (v0.2) |
-| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | **Partly fixed** (v0.2): core, `array*` and `obj*` built-ins exist on both; the rest waits for the registry (Phase 1) |
+| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | **Fixed** (v0.3): one registry; every core entry implemented on both runtimes |
 | D6 | `+` with strings and implicit coercion differ | both | **Fixed** (v0.2): `+` concatenates with a string; `interp` strict by default |
 | D7 | Caught error value unspecified | both | **Fixed** (v0.2): `{kind, line, message}` |
-| D8 | `loadModule` whitelisted but does nothing | vm | Open: Phase 3 |
-| D9 | Disassembler mis-decodes `CALL` | vmrun | Open: Phase 1 |
-| D10 | No default step/time budget in `vmrun` and `runSource` | both | Open: Phase 1 |
+| D8 | `loadModule` whitelisted but does nothing | vm | **Closed** (v0.3): removed from the registry; modules are Phase 3 |
+| D9 | Disassembler mis-decodes `CALL` | vmrun | **Fixed** |
+| D10 | No default step/time budget in `vmrun` and `runSource` | both | **Fixed** (v0.3): default budgets everywhere; budget errors are not catchable |
 | D11 | PulsarOS frontend script calls cannot reach the API | integration | Open: Phase 4 |
 | D12 | App manifest `script` shape differs between frontend and API | integration | Open: Phase 4 |
 | D13 | Syntax errors were swallowed; statements silently dropped | both | **Fixed** |

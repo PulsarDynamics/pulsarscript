@@ -1,4 +1,3 @@
-// @xfail vm D5 built-in missing from the Go VM host-call whitelist
 print(isInteger(10));
 print(isInteger(10.5));
 print(isFinite(1));

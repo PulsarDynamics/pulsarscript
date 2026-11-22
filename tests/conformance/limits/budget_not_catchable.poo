@@ -1,0 +1,3 @@
+// Running out of budget stops the program; try/catch cannot catch it (SPEC 7, D10).
+try { while (true) { } } catch (e) { print("caught"); }
+print("unreachable");
