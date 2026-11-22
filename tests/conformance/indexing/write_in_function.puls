@@ -1,0 +1,10 @@
+// Element assignment works on locals and on globals from a function.
+var store = {count: 0};
+function bump(n) {
+  var local = [0, 0];
+  local[1] = n;
+  store.count += local[1];
+  return local;
+}
+print(bump(3));
+print(store.count);

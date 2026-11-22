@@ -1,5 +1,5 @@
 import type { Assign } from "./classes/Assign";
-import type { Binary } from "./classes/Binary";
+import { Binary } from "./classes/Binary";
 import type { BlockStmt } from "./classes/BlockStmt";
 import type { Call } from "./classes/Call";
 import type { ExpressionStmt } from "./classes/ExpressionStmt";
@@ -7,7 +7,7 @@ import { FunctionStmt } from "./classes/FunctionStmt";
 import type { ForStmt } from "./classes/ForStmt";
 import type { Grouping } from "./classes/Grouping";
 import type { IfStmt } from "./classes/IfStmt";
-import type { Literal } from "./classes/Literal";
+import { Literal } from "./classes/Literal";
 import type { PrintStmt } from "./classes/PrintStmt";
 import type { ReturnStmt } from "./classes/ReturnStmt";
 import type { Unary } from "./classes/Unary";
@@ -25,6 +25,10 @@ import type { Stmt } from "./interfaces/Stmt";
 import type { StmtVisitor } from "./interfaces/StmtVisitor";
 import type { Token } from "./interfaces/Token";
 import { arityError, lookupHostFunction } from "./HostApi";
+import { IndexExpr } from "./classes/IndexExpr";
+import { SetIndex } from "./classes/SetIndex";
+import type { BreakStmt } from "./classes/BreakStmt";
+import type { ForOfStmt } from "./classes/ForOfStmt";
 
 export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     // Built-ins and host calls come from hostapi.json (SPEC §8); they are callable, not values.
@@ -35,6 +39,12 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     private hoisted = new Set<FunctionStmt>();
     /** Top-level `var` names: globals that function bodies may use even if declared later (SPEC 6, D1). */
     private topLevelVars = new Set<string>();
+    /** Top-level `const` names, so a function body cannot assign to one declared later. */
+    private topLevelConsts = new Set<string>();
+    /** Loops enclosing the current statement inside the current function (for break/continue). */
+    private loopDepth = 0;
+    /** Set while analyzing an expression statement or for-increment, where element assignment may appear. */
+    private statementLevel: Expr | null = null;
 
     /** Inside a function body, a top-level variable declared anywhere in the file is in scope. */
     private isLaterGlobal(name: Token): boolean {
@@ -43,7 +53,10 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
 
     analyze(statements: Stmt[]): void {
       for (const statement of statements) {
-        if (statement instanceof VarStmt) this.topLevelVars.add(statement.name.lexeme);
+        if (statement instanceof VarStmt) {
+          this.topLevelVars.add(statement.name.lexeme);
+          if (statement.isConst) this.topLevelConsts.add(statement.name.lexeme);
+        }
         if (statement instanceof FunctionStmt) {
           this.declareVariable(statement.name);
           this.environment.defineFunction(statement.name, statement);
@@ -77,7 +90,7 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       if (stmt.initializer !== null) {
         this.analyzeExpr(stmt.initializer);
       }
-      this.declareVariable(stmt.name);
+      this.declareVariable(stmt.name, stmt.isConst);
     }
   
   visitVariableExpr(expr: Variable): void {
@@ -89,9 +102,70 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
 
   visitAssignExpr(expr: Assign): void {
     this.analyzeExpr(expr.value);
-    if (!this.environment.isDefined(expr.name) && !this.isLaterGlobal(expr.name)) {
-        throw new SemanticError(expr.name, "Cannot assign to undefined variable.");
+    this.checkAssignable(expr.name);
+  }
+
+  /** A variable that may be assigned: defined, not a constant, not a function. */
+  private checkAssignable(name: Token): void {
+    if (!this.environment.isDefined(name) && !this.isLaterGlobal(name)) {
+        throw new SemanticError(name, "Cannot assign to undefined variable.");
     }
+    if (this.environment.isConst(name) || (!this.environment.isDefined(name) && this.topLevelConsts.has(name.lexeme))) {
+        throw new SemanticError(name, `Cannot assign to constant '${name.lexeme}'.`);
+    }
+    if (this.environment.getFunction(name) !== null && !this.environment.isValue(name)) {
+        throw new SemanticError(name, `Cannot assign to function '${name.lexeme}'.`);
+    }
+  }
+
+  visitIndexExpr(expr: IndexExpr): void {
+    this.analyzeExpr(expr.object);
+    this.analyzeExpr(expr.index);
+  }
+
+  visitSetIndexExpr(expr: SetIndex): void {
+    if (this.statementLevel !== expr) {
+      throw new SemanticError(expr.equals, "Assignment to an element or property must be a statement of its own.");
+    }
+    // Walk to the variable at the root of the target: a[i][j].k -> a.
+    const keys: Expr[] = [];
+    let node: Expr = expr.target;
+    while (node instanceof IndexExpr) {
+      keys.push(node.index);
+      node = node.object;
+    }
+    if (!(node instanceof Variable)) {
+      throw new SemanticError(expr.equals, "Invalid assignment target: it must start with a variable.");
+    }
+    this.checkAssignable(node.name);
+    // Nested or compound targets read their keys more than once; keys must not have side effects.
+    const compound = expr.value instanceof Binary && expr.value.left === expr.target;
+    if (keys.length > 1 || compound) {
+      for (const key of keys) {
+        if (!(key instanceof Literal) && !(key instanceof Variable)) {
+          throw new SemanticError(expr.equals, "In a nested or compound element assignment, each index must be a literal or a variable.");
+        }
+      }
+    }
+    this.statementLevel = null;
+    this.analyzeExpr(expr.target);
+    this.analyzeExpr(expr.value);
+  }
+
+  visitBreakStmt(stmt: BreakStmt): void {
+    if (this.loopDepth === 0) {
+      throw new SemanticError(stmt.keyword, `'${stmt.keyword.lexeme}' must be inside a loop.`);
+    }
+  }
+
+  visitForOfStmt(stmt: ForOfStmt): void {
+    this.analyzeExpr(stmt.iterable);
+    this.beginScope();
+    this.declareVariable(stmt.name, stmt.isConst);
+    this.loopDepth++;
+    this.analyzeStmt(stmt.body);
+    this.loopDepth--;
+    this.endScope();
   }
 
   visitFunctionStmt(stmt: FunctionStmt): void {
@@ -104,16 +178,21 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
         this.declareVariable(param);
       }
       const enclosingFunction = this.currentFunction;
+      const enclosingLoops = this.loopDepth;
       this.currentFunction = FunctionType.FUNCTION;
+      this.loopDepth = 0;
       for (const bodyStmt of stmt.body) {
         this.analyzeStmt(bodyStmt);
       }
       this.currentFunction = enclosingFunction;
+      this.loopDepth = enclosingLoops;
       this.endScope();
     }
   
     visitExpressionStmt(stmt: ExpressionStmt): void {
+      this.statementLevel = stmt.expression;
       this.analyzeExpr(stmt.expression);
+      this.statementLevel = null;
     }
   
     visitIfStmt(stmt: IfStmt): void {
@@ -139,7 +218,9 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   
   visitWhileStmt(stmt: WhileStmt): void {
     this.analyzeExpr(stmt.condition);
+    this.loopDepth++;
     this.analyzeStmt(stmt.body);
+    this.loopDepth--;
   }
 
   visitForStmt(stmt: ForStmt): void {
@@ -151,9 +232,13 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       this.analyzeExpr(stmt.condition);
     }
     if (stmt.increment !== null) {
+      this.statementLevel = stmt.increment;
       this.analyzeExpr(stmt.increment);
+      this.statementLevel = null;
     }
+    this.loopDepth++;
     this.analyzeStmt(stmt.body);
+    this.loopDepth--;
     this.endScope();
   }
 
@@ -167,10 +252,12 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
         this.analyzeExpr(arg);
       }
       if (!(expr.callee instanceof Variable)) {
-        throw new SemanticError(expr.paren, "Can only call functions.");
+        // A function value from an expression: fns[0](x), handlers.save(x). Checked when called.
+        this.analyzeExpr(expr.callee);
+        return;
       }
       const name = expr.callee.name;
-      const funcDecl = this.environment.getFunction(name);
+      const funcDecl = this.environment.isValue(name) ? null : this.environment.getFunction(name);
       if (funcDecl !== null) {
         // User-defined function (shadows a built-in of the same name)
         if (expr.arguments.length !== funcDecl.params.length) {
@@ -178,8 +265,9 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
         }
         return;
       }
-      if (this.environment.isDefined(name)) {
-        throw new SemanticError(expr.paren, "Can only call functions.");
+      if (this.environment.isDefined(name) || this.isLaterGlobal(name)) {
+        // A variable holding a function value; its arity is checked when called.
+        return;
       }
       // Otherwise it must be a registered built-in or host call; unknown names fail here (D3).
       const host = lookupHostFunction(name.lexeme);
@@ -236,11 +324,11 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       this.endScope();
     }
 
-    private declareVariable(name: Token): void {
+    private declareVariable(name: Token, isConst = false): void {
       if (this.environment.existsInCurrentScope(name)) {
         throw new SemanticError(name, "Variable with this name already declared in this scope.");
       }
-      this.environment.define(name, null);
+      this.environment.define(name, isConst ? CONST_MARK : null);
     }
   
     private beginScope(): void {
@@ -302,10 +390,27 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     return false;
   }
 
+  /** The nearest binding of `name` is a constant. */
+  isConst(name: Token): boolean {
+    if (this.values.has(name.lexeme)) return this.values.get(name.lexeme) === CONST_MARK;
+    if (this.functions.has(name.lexeme)) return false;
+    return this.enclosing !== null && this.enclosing.isConst(name);
+  }
+
+  /** The nearest binding of `name` is a variable (not a function declaration). */
+  isValue(name: Token): boolean {
+    if (this.values.has(name.lexeme)) return true;
+    if (this.functions.has(name.lexeme)) return false;
+    return this.enclosing !== null && this.enclosing.isValue(name);
+  }
+
   existsInCurrentScope(name: Token): boolean {
     return this.values.has(name.lexeme) || this.functions.has(name.lexeme);
   }
 }
+
+  /** Marks a `const` binding in Environment.values. */
+  const CONST_MARK = Symbol("const");
 
   enum FunctionType {
     NONE,

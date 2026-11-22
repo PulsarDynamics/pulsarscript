@@ -1,0 +1,3 @@
+// const declares a variable that cannot be reassigned.
+const PI = 3;
+print(PI * 2);

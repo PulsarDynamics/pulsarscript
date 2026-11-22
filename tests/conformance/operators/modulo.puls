@@ -1,0 +1,4 @@
+// % is the remainder, with the sign of the dividend.
+print(7 % 3);
+print(-7 % 3);
+print(7.5 % 2);

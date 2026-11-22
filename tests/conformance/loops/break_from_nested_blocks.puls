@@ -1,0 +1,11 @@
+// break and continue leave blocks that declare locals.
+var out = "";
+for (var i = 0; i < 5; i += 1) {
+  var tag = "i" + i;
+  if (i == 1) { var skip = true; continue; }
+  if (i == 3) { var stop = true; break; }
+  out += tag;
+}
+print(out);
+var after = "ok";
+print(after);

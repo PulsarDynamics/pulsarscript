@@ -1,0 +1,3 @@
+// The root of an assignment target must be a variable.
+function f() { return [1]; }
+f()[0] = 2;

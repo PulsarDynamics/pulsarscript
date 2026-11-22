@@ -1,3 +1,5 @@
+import type { IndexExpr } from "../classes/IndexExpr";
+import type { SetIndex } from "../classes/SetIndex";
 import type { Assign } from "../classes/Assign";
 import type { Binary } from "../classes/Binary";
 import type { Call } from "../classes/Call";
@@ -20,4 +22,6 @@ export interface ExprVisitor<R> {
   visitErrorExpr(expr: ErrorExpr): R;
   visitArrayExpr(expr: ArrayExpr): R;
   visitObjectExpr(expr: ObjectExpr): R;
+  visitIndexExpr(expr: IndexExpr): R;
+  visitSetIndexExpr(expr: SetIndex): R;
 }

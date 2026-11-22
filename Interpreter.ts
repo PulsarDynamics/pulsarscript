@@ -29,6 +29,10 @@ import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { CallFrame } from "./ErrorReporter";
 import { fromHost, isArray, isObject, sortedKeys, stringify, toHost, toNumber, typeName, valuesEqual } from "./Values";
 import { HOST_FUNCTIONS, arityError, arityRange, lookupHostFunction, type HostFunction } from "./HostApi";
+import type { IndexExpr } from "./classes/IndexExpr";
+import type { SetIndex } from "./classes/SetIndex";
+import type { BreakStmt } from "./classes/BreakStmt";
+import type { ForOfStmt } from "./classes/ForOfStmt";
 
 const RE_FLOAT = /^[+-]?(?:\d+\.\d+|\d+\.\d*|\.\d+|\d+)$/;
 
@@ -56,6 +60,16 @@ export class BudgetError extends RuntimeError {
 
 // Return exception for function returns. It is control flow, not an error: try/catch must
 // never catch it (D19).
+/** `break` or `continue`, unwinding to the nearest loop. Not an error: try/catch lets it pass. */
+class LoopSignal extends Error {
+  isContinue: boolean;
+
+  constructor(isContinue: boolean) {
+    super();
+    this.isContinue = isContinue;
+  }
+}
+
 class ReturnException extends Error {
   value: any;
 
@@ -198,6 +212,8 @@ export const DEFAULT_LIMITS: Required<ExecutionLimits> = {
 export interface EventBridge {
   emit(payload: unknown): unknown;
   poll(): unknown;
+  /** Delivers a payload to the app's open windows (notifyWindow). */
+  notifyWindow?(payload: unknown): unknown;
 }
 
 export type InterpreterOptions = {
@@ -437,9 +453,45 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         if (!io.deleteFile) fail("fsDelete", "not supported by this host");
         return fromHostResult(io.deleteFile!(p));
       },
+      fsMkdir: (p) => {
+        const io = ensureIO("fsMkdir");
+        if (!io.mkdir) fail("fsMkdir", "not supported by this host");
+        return fromHostResult(io.mkdir!(p));
+      },
+      fsRename: (from, to) => {
+        const io = ensureIO("fsRename");
+        if (!io.rename) fail("fsRename", "not supported by this host");
+        return fromHostResult(io.rename!(from, to));
+      },
+      fsCopy: (from, to) => {
+        const io = ensureIO("fsCopy");
+        if (!io.copy) fail("fsCopy", "not supported by this host");
+        return fromHostResult(io.copy!(from, to));
+      },
+      fsQuota: () => {
+        const io = ensureIO("fsQuota");
+        if (!io.quota) fail("fsQuota", "not supported by this host");
+        return fromHostResult(io.quota!());
+      },
+      fsReadBase64: (p) => {
+        const io = ensureIO("fsReadBase64");
+        if (!io.readFileBase64) fail("fsReadBase64", "not supported by this host");
+        return fromHostResult(io.readFileBase64!(p));
+      },
+      fsWriteBase64: (p, data) => {
+        const io = ensureIO("fsWriteBase64");
+        if (!io.writeFileBase64) fail("fsWriteBase64", "not supported by this host");
+        return fromHostResult(io.writeFileBase64!(p, data));
+      },
       // Host: events
       emitEvent: (payload = null) => fromHost(ensureEvents("emitEvent").emit(toHost(payload)) ?? null),
       pollEvent: () => fromHost(ensureEvents("pollEvent").poll() ?? null),
+      notifyWindow: (payload) => {
+        const events = ensureEvents("notifyWindow");
+        if (!events.notifyWindow) fail("notifyWindow", "not supported by this host");
+        events.notifyWindow!(toHost(payload));
+        return null;
+      },
       // Host: PulsarOS IPC
       ipcSetContext: (deviceId, processId) => {
         this.ipcDefaults.deviceId = deviceId;
@@ -572,8 +624,117 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   visitWhileStmt(stmt: WhileStmt): void {
     while (this.isTruthy(this.evaluate(stmt.condition))) {
       this.tick();
-      this.execute(stmt.body);
+      if (this.runLoopBody(stmt.body) === "break") break;
     }
+  }
+
+  /** Runs one iteration's body; reports a `break` so the loop can stop (`continue` just ends the body). */
+  private runLoopBody(body: Stmt): "break" | null {
+    try {
+      this.execute(body);
+    } catch (err) {
+      if (err instanceof LoopSignal) return err.isContinue ? null : "break";
+      throw err;
+    }
+    return null;
+  }
+
+  visitBreakStmt(stmt: BreakStmt): void {
+    throw new LoopSignal(stmt.isContinue);
+  }
+
+  visitForOfStmt(stmt: ForOfStmt): void {
+    const iterable = this.evaluate(stmt.iterable);
+    let items: any[];
+    if (isArray(iterable)) items = iterable;
+    else if (isObject(iterable)) items = sortedKeys(iterable);
+    else if (typeof iterable === "string") items = Array.from(iterable);
+    else throw this.createRuntimeError(stmt.name, `for...of needs an array, object or string, got ${typeName(iterable)}`);
+
+    const previous = this.environment;
+    try {
+      for (const item of items) {
+        this.tick();
+        this.environment = new Environment(previous);
+        this.environment.define(stmt.name.lexeme, item);
+        if (this.runLoopBody(stmt.body) === "break") break;
+      }
+    } finally {
+      this.environment = previous;
+    }
+  }
+
+  visitIndexExpr(expr: IndexExpr): any {
+    const container = this.evaluate(expr.object);
+    const key = this.evaluate(expr.index);
+    return this.readElement(container, key, expr);
+  }
+
+  /** container[key] with the rules the VM's INDEX_GET follows (SPEC 4.8). */
+  private readElement(container: any, key: any, expr: IndexExpr): any {
+    if (isObject(container)) {
+      if (typeof key !== "string") {
+        throw this.createRuntimeError(expr.token, `object keys must be strings, got ${typeName(key)}`);
+      }
+      return container.has(key) ? container.get(key) : null;
+    }
+    if (expr.member) {
+      throw this.createRuntimeError(expr.token, `cannot read property '${key}' of ${typeName(container)}`);
+    }
+    if (isArray(container) || typeof container === "string") {
+      const items = isArray(container) ? container : Array.from(container);
+      const i = this.indexOf(key, items.length, expr.token, false);
+      return items[i];
+    }
+    throw this.createRuntimeError(expr.token, `cannot index ${typeName(container)}`);
+  }
+
+  /** Validates an array or string index; `forWrite` also allows appending at the end. */
+  private indexOf(key: any, length: number, token: Token, forWrite: boolean): number {
+    if (typeof key !== "number" || !Number.isInteger(key)) {
+      throw this.createRuntimeError(token, `index must be an integer, got ${typeof key === "number" ? String(key) : typeName(key)}`);
+    }
+    if (key < 0 || key > length || (key === length && !forWrite)) {
+      throw this.createRuntimeError(token, `index ${key} out of bounds (length ${length})`);
+    }
+    return key;
+  }
+
+  /** A copy of `container` with `container[key] = value` (arrays and objects are values, SPEC 3.3). */
+  private withElement(container: any, key: any, value: any, expr: IndexExpr): any {
+    if (isObject(container)) {
+      if (typeof key !== "string") {
+        throw this.createRuntimeError(expr.token, `object keys must be strings, got ${typeName(key)}`);
+      }
+      const next = new Map(container);
+      next.set(key, value);
+      return next;
+    }
+    if (isArray(container) && !expr.member) {
+      const i = this.indexOf(key, container.length, expr.token, true);
+      const next = container.slice();
+      next[i] = value;
+      return next;
+    }
+    throw this.createRuntimeError(expr.token, `cannot set an element of ${typeName(container)}`);
+  }
+
+  visitSetIndexExpr(expr: SetIndex): any {
+    // Evaluate the innermost container and key, then the value, as the compiler does.
+    let target = expr.target;
+    let container = this.evaluate(target.object);
+    let key = this.evaluate(target.index);
+    let updated = this.withElement(container, key, this.evaluate(expr.value), target);
+    // Store the copy back up the chain: a[i][j] = v -> a[i] = (a[i] with j = v) -> a = ...
+    while (!(target.object instanceof Variable)) {
+      const parent = target.object as IndexExpr;
+      container = this.evaluate(parent.object);
+      key = this.evaluate(parent.index);
+      updated = this.withElement(container, key, updated, parent);
+      target = parent;
+    }
+    this.environment.assign((target.object as Variable).name, updated);
+    return null;
   }
 
   visitForStmt(stmt: ForStmt): void {
@@ -591,7 +752,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       // Loop while condition is truthy (or forever if no condition)
       while (stmt.condition === null || this.isTruthy(this.evaluate(stmt.condition))) {
         this.tick();
-        this.execute(stmt.body);
+        if (this.runLoopBody(stmt.body) === "break") break;
 
         // Execute increment (if present)
         if (stmt.increment !== null) {
@@ -672,6 +833,13 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
           return this.stringify(left) + this.stringify(right);
         }
         throw this.createRuntimeError(expr.operator, "Operands must be two numbers, or include a string.");
+      case TokenType.PERCENT:
+        this.checkNumberOperands(expr.operator, left, right);
+        if ((right as number) === 0) {
+          throw this.createRuntimeError(expr.operator, "modulo by zero");
+        }
+        // Remainder with the sign of the dividend, as in C, Go and JavaScript.
+        return (left as number) % (right as number);
       case TokenType.SLASH:
         if (this.options.strictTypes) {
           this.checkNumberOperands(expr.operator, left, right);
@@ -790,7 +958,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       this.executeBlock(stmt.tryBlock, new Environment(this.environment));
     } catch (err) {
       // `return` inside try is not an error (D19), and budgets cannot be caught (D10).
-      if (err instanceof ReturnException || err instanceof BudgetError) throw err;
+      if (err instanceof ReturnException || err instanceof BudgetError || err instanceof LoopSignal) throw err;
       const env = new Environment(this.environment);
       if (stmt.catchParam) {
         env.define(stmt.catchParam, this.errorToValue(err));

@@ -46,6 +46,13 @@ export enum Opcode {
   NEW_OBJECT = 39, // operand: property count; pops N key/value pairs, pushes object
   OBJ_GET = 40,    // pops key, pops object, pushes value
   OBJ_SET = 41,    // pops value, pops key, pops object; sets property (no push)
+  // Bytecode version 2 (SPEC v0.5)
+  INDEX_GET = 42,  // operand: 1 for o.key, 0 for x[k]; pops key, container; pushes element
+  INDEX_SET = 43,  // operand: as INDEX_GET; pops value, key, container; pushes updated copy
+  MOD = 44,        // pops b, a; pushes a % b
+  FUNC = 45,       // operand: function address; pushes a function value
+  CALL_VALUE = 46, // operand: arg count; calls the function value below the arguments
+  ITER_ITEMS = 47, // pops x; pushes the items for...of walks (array, object keys, characters)
 }
 
 export interface FunctionEntry {
@@ -70,8 +77,9 @@ export const BYTECODE_FORMAT = "pulsarscript-bytecode";
  * operands, file fields); the VM rejects versions it does not support.
  *   0: no header (before SPEC v0.4); still loaded.
  *   1: header {format, version, compiler, sourceHash}; otherwise the same as 0.
+ *   2: adds INDEX_GET, INDEX_SET, MOD, FUNC, CALL_VALUE and ITER_ITEMS (SPEC v0.5).
  */
-export const BYTECODE_VERSION = 1;
+export const BYTECODE_VERSION = 2;
 
 export interface BytecodeHeader {
   format: typeof BYTECODE_FORMAT;

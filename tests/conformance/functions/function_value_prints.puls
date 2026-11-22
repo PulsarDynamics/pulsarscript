@@ -1,0 +1,4 @@
+// A function value prints as <fn name>.
+function hello() { return 1; }
+print(hello);
+print([hello]);

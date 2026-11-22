@@ -42,8 +42,18 @@ describe("lexer", () => {
   });
 
   test("a trailing dot is not part of a number", () => {
-    // "1." lexes as NUMBER(1) and then '.', which is not a valid character.
-    expect(() => tokens("1.")).toThrow(/Unexpected character '\.'/);
+    // "1." lexes as NUMBER(1) and then DOT (member access, SPEC v0.5).
+    const ts = tokens("1.");
+    expect(ts[0].type).toBe(T.NUMBER);
+    expect(ts[1].type).toBe(T.DOT);
+  });
+
+  test("compound assignment and modulo operators", () => {
+    const types = tokens("a += 1; b -= 1; c *= 1; d /= 1; e %= 1; f % 2").map((t) => t.type);
+    for (const t of [T.PLUS_EQUAL, T.MINUS_EQUAL, T.STAR_EQUAL,
+      T.SLASH_EQUAL, T.PERCENT_EQUAL, T.PERCENT]) {
+      expect(types).toContain(t);
+    }
   });
 
   test("string literals drop their quotes", () => {
@@ -72,6 +82,6 @@ describe("lexer", () => {
   });
 
   test("unexpected character is an error", () => {
-    expect(() => tokens("1 % 2")).toThrow(/Unexpected character '%'/);
+    expect(() => tokens("1 @ 2")).toThrow(/Unexpected character '@'/);
   });
 });

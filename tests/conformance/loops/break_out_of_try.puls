@@ -1,0 +1,7 @@
+// break inside try leaves the try block without a stale handler.
+var n = 0;
+while (true) {
+  n += 1;
+  try { if (n == 2) { break; } } catch (e) { print("unexpected"); }
+}
+try { print(1 % 0); } catch (e) { print("handled " + n); }

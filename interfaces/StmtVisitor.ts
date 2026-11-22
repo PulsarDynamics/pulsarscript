@@ -1,3 +1,5 @@
+import type { BreakStmt } from "../classes/BreakStmt";
+import type { ForOfStmt } from "../classes/ForOfStmt";
 import type { BlockStmt } from "../classes/BlockStmt";
 import type { ExpressionStmt } from "../classes/ExpressionStmt";
 import type { ForStmt } from "../classes/ForStmt";
@@ -20,4 +22,6 @@ export interface StmtVisitor<R> {
     visitFunctionStmt(stmt: FunctionStmt): R;
     visitReturnStmt(stmt: ReturnStmt): R;
     visitTryCatchStmt(stmt: TryCatchStmt): R;
+    visitBreakStmt(stmt: BreakStmt): R;
+    visitForOfStmt(stmt: ForOfStmt): R;
   }

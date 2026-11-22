@@ -58,6 +58,13 @@ const (
 	OpNewObject    byte = 39 // operand: property count; pops N key/value pairs, pushes object
 	OpObjGet       byte = 40 // pops key, pops object, pushes value
 	OpObjSet       byte = 41 // pops value, pops key, pops object; sets property
+	// Bytecode version 2 (SPEC v0.5):
+	OpIndexGet  byte = 42 // operand: 1 for o.key, 0 for x[k]; pops key, pops container, pushes element
+	OpIndexSet  byte = 43 // operand: as INDEX_GET; pops value, key, container; pushes the updated copy
+	OpMod       byte = 44 // pops b, pops a, pushes a % b
+	OpFunc      byte = 45 // operand: function address; pushes a function value
+	OpCallValue byte = 46 // operand: arg count; calls the function value below the arguments
+	OpIterItems byte = 47 // pops x, pushes what for...of walks: array as is, object keys, string characters
 )
 
 const (
@@ -94,6 +101,7 @@ const (
 	kindBool
 	kindArray
 	kindObject
+	kindFunction
 )
 
 const (
@@ -103,6 +111,7 @@ const (
 	KindBool
 	KindArray
 	KindObject
+	KindFunction
 )
 
 func Number(v float64) Value              { return Value{kind: kindNumber, num: v} }
@@ -111,6 +120,11 @@ func Bool(v bool) Value                   { return Value{kind: kindBool, b: v} }
 func Nil() Value                          { return Value{kind: kindNil} }
 func Array(elements []Value) Value        { return Value{kind: kindArray, arr: elements} }
 func Object(props map[string]Value) Value { return Value{kind: kindObject, obj: props} }
+
+// Function is a reference to a top-level function: its code address and name (SPEC 3.1).
+func Function(address int, name string) Value {
+	return Value{kind: kindFunction, num: float64(address), str: name}
+}
 
 func (v Value) Kind() Kind      { return Kind(v.kind) }
 func (v Value) Number() float64 { return v.num }
@@ -150,6 +164,8 @@ func (v Value) String() string {
 			parts[i] = name + ": " + v.obj[k].repr()
 		}
 		return "{" + strings.Join(parts, ", ") + "}"
+	case kindFunction:
+		return "<fn " + v.str + ">"
 	default:
 		return "<?>"
 	}
@@ -228,6 +244,8 @@ func typeName(v Value) string {
 		return "array"
 	case kindObject:
 		return "object"
+	case kindFunction:
+		return "function"
 	default:
 		return "unknown"
 	}
@@ -1004,39 +1022,120 @@ func (vm *VM) Step() error {
 		}
 		argCount := code[vm.ip]
 		vm.ip++
-		if argCount < 0 {
-			return fmt.Errorf("negative arg count for CALL: %d", argCount)
+		return vm.callFunction(target, argCount)
+	case OpCallValue:
+		if vm.ip >= len(code) {
+			return errors.New("missing operand for CALL_VALUE")
 		}
-		base := len(vm.stack) - argCount
-		if base < 0 {
-			return fmt.Errorf("call requires %d args but stack has %d", argCount, len(vm.stack))
+		argCount := code[vm.ip]
+		vm.ip++
+		at := len(vm.stack) - argCount - 1
+		if argCount < 0 || at < vm.currentBase()+*vm.currentLocals() {
+			return fmt.Errorf("CALL_VALUE: stack has no callee for %d args", argCount)
 		}
-		if target < 0 || target >= len(code) {
-			return fmt.Errorf("call target out of range: %d", target)
+		callee := vm.stack[at]
+		if callee.kind != kindFunction {
+			return fmt.Errorf("can only call functions, got %s", typeName(callee))
 		}
-		info, hasInfo := vm.module.Functions[target]
-		localCount := argCount
-		if hasInfo {
-			if info.Arity != argCount {
-				name := info.Name
-				if name == "" {
-					name = fmt.Sprintf("fn@%d", target)
-				}
-				return fmt.Errorf("%s expects %d args, got %d", name, info.Arity, argCount)
-			}
-			if info.Locals > localCount {
-				localCount = info.Locals
-			}
+		// Drop the callee from under the arguments, then call as CALL does.
+		copy(vm.stack[at:], vm.stack[at+1:])
+		vm.stack = vm.stack[:len(vm.stack)-1]
+		return vm.callFunction(int(callee.num), argCount)
+	case OpFunc:
+		if vm.ip >= len(code) {
+			return errors.New("missing operand for FUNC")
 		}
-		if err := vm.ensureStackSize(base + localCount); err != nil {
+		target := code[vm.ip]
+		vm.ip++
+		info, ok := vm.module.Functions[target]
+		if !ok {
+			return fmt.Errorf("FUNC: no function at %d", target)
+		}
+		return vm.push(Function(target, info.Name))
+	case OpMod:
+		b, err := vm.pop()
+		if err != nil {
 			return err
 		}
-		if len(vm.frames) >= maxCallDepth {
-			return errors.New("call stack overflow")
+		a, err := vm.pop()
+		if err != nil {
+			return err
 		}
-		frame := callFrame{returnIP: vm.ip, base: base, locals: localCount, name: info.Name, arity: argCount}
-		vm.frames = append(vm.frames, frame)
-		vm.ip = target
+		if a.kind != kindNumber || b.kind != kindNumber {
+			return fmt.Errorf("operands of %% must be numbers, got %s and %s", typeName(a), typeName(b))
+		}
+		if b.num == 0 {
+			return errors.New("modulo by zero")
+		}
+		// Remainder with the sign of the dividend, as in C, Go and JavaScript.
+		return vm.push(Number(math.Mod(a.num, b.num)))
+	case OpIterItems:
+		x, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		switch x.kind {
+		case kindArray:
+			return vm.push(x)
+		case kindObject:
+			keys := sortedKeys(x.obj)
+			items := make([]Value, len(keys))
+			for i, k := range keys {
+				items[i] = String(k)
+			}
+			return vm.push(Array(items))
+		case kindString:
+			runes := []rune(x.str)
+			items := make([]Value, len(runes))
+			for i, r := range runes {
+				items[i] = String(string(r))
+			}
+			return vm.push(Array(items))
+		default:
+			return fmt.Errorf("for...of needs an array, object or string, got %s", typeName(x))
+		}
+	case OpIndexGet:
+		if vm.ip >= len(code) {
+			return errors.New("missing operand for INDEX_GET")
+		}
+		member := code[vm.ip] == 1
+		vm.ip++
+		key, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		container, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		v, err := readElement(container, key, member)
+		if err != nil {
+			return err
+		}
+		return vm.push(v)
+	case OpIndexSet:
+		if vm.ip >= len(code) {
+			return errors.New("missing operand for INDEX_SET")
+		}
+		member := code[vm.ip] == 1
+		vm.ip++
+		val, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		key, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		container, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		next, err := withElement(container, key, val, member)
+		if err != nil {
+			return err
+		}
+		return vm.push(next)
 	case OpReturn:
 		ret, err := vm.pop()
 		if err != nil {
@@ -1325,6 +1424,131 @@ func (vm *VM) Step() error {
 	return nil
 }
 
+// callFunction enters the function at target with argCount arguments on the stack
+// (CALL and CALL_VALUE).
+func (vm *VM) callFunction(target, argCount int) error {
+	code := vm.module.Code
+	if argCount < 0 {
+		return fmt.Errorf("negative arg count for CALL: %d", argCount)
+	}
+	base := len(vm.stack) - argCount
+	if base < 0 {
+		return fmt.Errorf("call requires %d args but stack has %d", argCount, len(vm.stack))
+	}
+	if target < 0 || target >= len(code) {
+		return fmt.Errorf("call target out of range: %d", target)
+	}
+	info, hasInfo := vm.module.Functions[target]
+	localCount := argCount
+	if hasInfo {
+		if info.Arity != argCount {
+			name := info.Name
+			if name == "" {
+				name = fmt.Sprintf("fn@%d", target)
+			}
+			return fmt.Errorf("%s expects %d args, got %d", name, info.Arity, argCount)
+		}
+		if info.Locals > localCount {
+			localCount = info.Locals
+		}
+	}
+	if err := vm.ensureStackSize(base + localCount); err != nil {
+		return err
+	}
+	if len(vm.frames) >= maxCallDepth {
+		return errors.New("call stack overflow")
+	}
+	frame := callFrame{returnIP: vm.ip, base: base, locals: localCount, name: info.Name, arity: argCount}
+	vm.frames = append(vm.frames, frame)
+	vm.ip = target
+	return nil
+}
+
+// readElement is container[key] (SPEC 4.8): arrays and strings take an integer index,
+// objects a string key (a missing key reads as nil). member is true for o.key.
+func readElement(container, key Value, member bool) (Value, error) {
+	switch container.kind {
+	case kindObject:
+		if key.kind != kindString {
+			return Nil(), fmt.Errorf("object keys must be strings, got %s", typeName(key))
+		}
+		if v, ok := container.obj[key.str]; ok {
+			return v, nil
+		}
+		return Nil(), nil
+	case kindArray, kindString:
+		if member {
+			return Nil(), fmt.Errorf("cannot read property '%s' of %s", key.String(), typeName(container))
+		}
+		if container.kind == kindArray {
+			i, err := elementIndex(key, len(container.arr), false)
+			if err != nil {
+				return Nil(), err
+			}
+			return container.arr[i], nil
+		}
+		runes := []rune(container.str)
+		i, err := elementIndex(key, len(runes), false)
+		if err != nil {
+			return Nil(), err
+		}
+		return String(string(runes[i])), nil
+	default:
+		if member {
+			return Nil(), fmt.Errorf("cannot read property '%s' of %s", key.String(), typeName(container))
+		}
+		return Nil(), fmt.Errorf("cannot index %s", typeName(container))
+	}
+}
+
+// elementIndex validates an array or string index; forWrite also allows the index one past
+// the end, which appends.
+func elementIndex(key Value, length int, forWrite bool) (int, error) {
+	if key.kind != kindNumber || key.num != math.Trunc(key.num) || math.IsInf(key.num, 0) {
+		if key.kind == kindNumber {
+			return 0, fmt.Errorf("index must be an integer, got %s", FormatNumber(key.num))
+		}
+		return 0, fmt.Errorf("index must be an integer, got %s", typeName(key))
+	}
+	i := int(key.num)
+	if i < 0 || i > length || (i == length && !forWrite) {
+		return 0, fmt.Errorf("index %d out of bounds (length %d)", i, length)
+	}
+	return i, nil
+}
+
+// withElement returns a copy of container with container[key] = val: arrays and objects
+// are values (SPEC 3.3), so the original is never changed.
+func withElement(container, key, val Value, member bool) (Value, error) {
+	switch {
+	case container.kind == kindObject:
+		if key.kind != kindString {
+			return Nil(), fmt.Errorf("object keys must be strings, got %s", typeName(key))
+		}
+		next := make(map[string]Value, len(container.obj)+1)
+		for k, v := range container.obj {
+			next[k] = v
+		}
+		next[key.str] = val
+		return Object(next), nil
+	case container.kind == kindArray && !member:
+		i, err := elementIndex(key, len(container.arr), true)
+		if err != nil {
+			return Nil(), err
+		}
+		next := make([]Value, len(container.arr), len(container.arr)+1)
+		copy(next, container.arr)
+		if i == len(next) {
+			next = append(next, val)
+		} else {
+			next[i] = val
+		}
+		return Array(next), nil
+	default:
+		return Nil(), fmt.Errorf("cannot set an element of %s", typeName(container))
+	}
+}
+
 func isTruthy(v Value) bool {
 	switch v.kind {
 	case kindNil:
@@ -1349,6 +1573,8 @@ func valuesEqual(a, b Value) bool {
 		return a.num == b.num
 	case kindString:
 		return a.str == b.str
+	case kindFunction:
+		return a.num == b.num
 	case kindArray:
 		// Arrays and objects are values, so equality compares contents (SPEC 4.3).
 		if len(a.arr) != len(b.arr) {
@@ -1514,9 +1740,10 @@ const (
 	// BytecodeFormat is the "format" field of every PulsarScript bytecode file.
 	BytecodeFormat = "pulsarscript-bytecode"
 	// BytecodeVersion is the newest format version this VM reads; compile.ts writes it.
-	BytecodeVersion = 1
+	BytecodeVersion = 2
 	// MinBytecodeVersion is the oldest version still loaded: 0 is a file without a header,
-	// written before SPEC v0.4, which is otherwise identical to version 1.
+	// written before SPEC v0.4, which is otherwise identical to version 1. Version 2
+	// (SPEC v0.5) adds INDEX_GET, INDEX_SET, MOD, FUNC, CALL_VALUE and ITER_ITEMS.
 	MinBytecodeVersion = 0
 )
 

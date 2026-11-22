@@ -1,0 +1,6 @@
+// a[i] reads an element; strings index by character.
+var a = [10, 20, 30];
+print(a[0] + a[2]);
+var i = 1;
+print(a[i]);
+print("héllo"[1]);
