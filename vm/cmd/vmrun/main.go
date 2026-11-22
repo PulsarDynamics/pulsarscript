@@ -121,6 +121,11 @@ func main() {
 // printDisassembly outputs human-readable bytecode
 func printDisassembly(mod pulsarscriptvm.Module) {
 	fmt.Printf("=== Bytecode Disassembly ===\n")
+	if mod.Version > 0 {
+		fmt.Printf("Format: version %d, %s, source %s\n", mod.Version, mod.Compiler, mod.SourceHash)
+	} else {
+		fmt.Printf("Format: version 0 (no header)\n")
+	}
 	fmt.Printf("Constants: %d\n", len(mod.Constants))
 	for i, c := range mod.Constants {
 		fmt.Printf("  [%d] %v\n", i, c.String())

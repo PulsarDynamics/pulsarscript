@@ -173,3 +173,18 @@ describe("compiler: line map (D18)", () => {
     expect(chunk.lineMap![setGlobal]).toBe(6);
   });
 });
+
+describe("bytecode header (A5)", () => {
+  test("withHeader puts format, version, compiler and source hash first", async () => {
+    const { withHeader, BYTECODE_FORMAT, BYTECODE_VERSION, sourceHash } = await import("../../Bytecode");
+    const src = "print(1);";
+    const file = withHeader(compile(src), src, "9.9.9");
+    expect(Object.keys(file).slice(0, 4)).toEqual(["format", "version", "compiler", "sourceHash"]);
+    expect(file.format).toBe(BYTECODE_FORMAT);
+    expect(file.version).toBe(BYTECODE_VERSION);
+    expect(file.compiler).toBe("pulsarscript 9.9.9");
+    expect(file.sourceHash).toBe(sourceHash(src));
+    expect(file.sourceHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(sourceHash(src + " ")).not.toBe(file.sourceHash);
+  });
+});

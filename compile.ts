@@ -3,6 +3,8 @@ import { Parser, ParseError } from "./Parser";
 import { SemanticAnalyzer, SemanticError } from "./SemanticAnalyzer";
 import { BytecodeCompiler } from "./BytecodeCompiler";
 import { ErrorReporter } from "./ErrorReporter";
+import { withHeader } from "./Bytecode";
+import pkg from "./package.json";
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -71,7 +73,8 @@ try {
     delete (chunk as any).lineMap;
   }
 
-  await Bun.write(outputPath, JSON.stringify(chunk, null, 2));
+  // Versioned header first (SPEC §10, A5): the VM rejects formats it does not know.
+  await Bun.write(outputPath, JSON.stringify(withHeader(chunk, source, pkg.version), null, 2));
   console.log(`✓ Compiled to ${outputPath}`);
   if (flags.emitSourcemap) {
     console.log(`  (includes source map with ${chunk.lineMap?.length || 0} entries)`);

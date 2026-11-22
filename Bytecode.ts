@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export enum Opcode {
   CONST = 0,
   ADD = 1,
@@ -58,4 +60,41 @@ export interface Chunk {
   code: number[]; // sequence of opcodes and operands
   functions?: FunctionEntry[];
   lineMap?: number[]; // instruction index → source line number
+}
+
+/** Identifies a PulsarScript bytecode file (SPEC §10, decision A5). */
+export const BYTECODE_FORMAT = "pulsarscript-bytecode";
+
+/**
+ * Bytecode format version. Bump it on any change the VM must know about (opcodes,
+ * operands, file fields); the VM rejects versions it does not support.
+ *   0: no header (before SPEC v0.4); still loaded.
+ *   1: header {format, version, compiler, sourceHash}; otherwise the same as 0.
+ */
+export const BYTECODE_VERSION = 1;
+
+export interface BytecodeHeader {
+  format: typeof BYTECODE_FORMAT;
+  version: number;
+  /** Compiler that wrote the file, e.g. "pulsarscript 0.4.0". */
+  compiler: string;
+  /** "sha256:<hex>" of the UTF-8 source, so tools can tell a stale bundle. */
+  sourceHash: string;
+}
+
+export type BytecodeFile = BytecodeHeader & Chunk;
+
+export function sourceHash(source: string): string {
+  return "sha256:" + createHash("sha256").update(source, "utf8").digest("hex");
+}
+
+/** The file compile.ts writes: the header first, then the chunk. */
+export function withHeader(chunk: Chunk, source: string, compilerVersion: string): BytecodeFile {
+  return {
+    format: BYTECODE_FORMAT,
+    version: BYTECODE_VERSION,
+    compiler: `pulsarscript ${compilerVersion}`,
+    sourceHash: sourceHash(source),
+    ...chunk,
+  };
 }

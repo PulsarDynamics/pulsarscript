@@ -274,6 +274,11 @@ type Module struct {
 	Functions       map[int]FunctionInfo
 	FunctionsByName map[string]FunctionInfo
 	LineMap         []int // instruction index → source line number
+
+	// From the file header (A5); zero values for a version 0 file.
+	Version    int    // bytecode format version
+	Compiler   string // e.g. "pulsarscript 0.4.0"
+	SourceHash string // "sha256:<hex>" of the source
 }
 
 // FunctionInfo describes a compiled function entry.
@@ -287,12 +292,19 @@ type FunctionInfo struct {
 // LoadModule parses a JSON-encoded chunk {constants: [...], code: [...]}.
 func LoadModule(data []byte) (Module, error) {
 	var raw struct {
-		Constants []interface{}  `json:"constants"`
-		Code      []int          `json:"code"`
-		Functions []FunctionInfo `json:"functions"`
-		LineMap   []int          `json:"lineMap"`
+		Format     string         `json:"format"`
+		Version    int            `json:"version"`
+		Compiler   string         `json:"compiler"`
+		SourceHash string         `json:"sourceHash"`
+		Constants  []interface{}  `json:"constants"`
+		Code       []int          `json:"code"`
+		Functions  []FunctionInfo `json:"functions"`
+		LineMap    []int          `json:"lineMap"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
+		return Module{}, err
+	}
+	if err := checkHeader(raw.Format, raw.Version); err != nil {
 		return Module{}, err
 	}
 	constants := make([]Value, len(raw.Constants))
@@ -318,7 +330,10 @@ func LoadModule(data []byte) (Module, error) {
 			funcsByName[fn.Name] = fn
 		}
 	}
-	mod := Module{Constants: constants, Code: raw.Code, Functions: funcs, FunctionsByName: funcsByName, LineMap: raw.LineMap}
+	mod := Module{
+		Constants: constants, Code: raw.Code, Functions: funcs, FunctionsByName: funcsByName, LineMap: raw.LineMap,
+		Version: raw.Version, Compiler: raw.Compiler, SourceHash: raw.SourceHash,
+	}
 	if err := VerifyModule(mod); err != nil {
 		return Module{}, fmt.Errorf("invalid module: %w", err)
 	}
@@ -1492,4 +1507,30 @@ func (vm *VM) DispatchHandlerWithBudget(name string, args []Value, maxSteps int,
 		return Nil(), nil
 	}
 	return vm.stack[len(vm.stack)-1], nil
+}
+
+// Bytecode file format (SPEC §10, decision A5).
+const (
+	// BytecodeFormat is the "format" field of every PulsarScript bytecode file.
+	BytecodeFormat = "pulsarscript-bytecode"
+	// BytecodeVersion is the newest format version this VM reads; compile.ts writes it.
+	BytecodeVersion = 1
+	// MinBytecodeVersion is the oldest version still loaded: 0 is a file without a header,
+	// written before SPEC v0.4, which is otherwise identical to version 1.
+	MinBytecodeVersion = 0
+)
+
+// checkHeader rejects files that are not PulsarScript bytecode or whose format version
+// this VM does not know, instead of misreading them.
+func checkHeader(format string, version int) error {
+	if format == "" && version == 0 {
+		return nil // version 0: no header
+	}
+	if format != BytecodeFormat {
+		return fmt.Errorf("not PulsarScript bytecode (format %q)", format)
+	}
+	if version < 1 || version > BytecodeVersion {
+		return fmt.Errorf("bytecode version %d is not supported: this VM reads versions %d to %d; recompile with a matching compiler or upgrade the VM", version, MinBytecodeVersion, BytecodeVersion)
+	}
+	return nil
 }
