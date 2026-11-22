@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Lexer } from "../../Lexer";
-import { Parser } from "../../Parser";
+import { Parser, ParseError } from "../../Parser";
 import { Binary } from "../../classes/Binary";
 import { Literal } from "../../classes/Literal";
 import { ExpressionStmt } from "../../classes/ExpressionStmt";
@@ -94,16 +94,41 @@ describe("parser: statements", () => {
   });
 });
 
-describe("parser: errors", () => {
-  // D13: today the parser swallows every ParseError and replaces the statement with `nil;`.
-  // These document the current behaviour; the todo tests describe the SPEC behaviour.
-  test("current behaviour: a bad statement is silently replaced by `nil;` (D13)", () => {
-    const stmts = parse("var x = ;\nprint(1);");
-    expect(stmts).toHaveLength(2);
-    expect(stmts[0]).toBeInstanceOf(ExpressionStmt);
-    expect(((stmts[0] as ExpressionStmt).expression as Literal).value).toBeNull();
+describe("parser: errors (D13)", () => {
+  const fail = (src: string): ParseError => {
+    try {
+      parse(src);
+    } catch (e) {
+      if (e instanceof ParseError) return e;
+      throw e;
+    }
+    throw new Error("expected a ParseError");
+  };
+
+  test("a syntax error stops parsing with its line and message", () => {
+    const err = fail("print(1);\nvar x = ;\nprint(2);");
+    expect(err.token.line).toBe(2);
+    expect(err.message).toBe("Expect expression.");
   });
 
-  test.todo("SPEC: a syntax error is reported with its line and stops compilation (D13)");
-  test.todo("SPEC: several syntax errors are all reported in one pass (D13)");
+  test("every syntax error is reported in one pass", () => {
+    const err = fail("var = 1;\nprint(2);\nprint((3);\n1 = 2;");
+    expect(err.errors.map((e) => e.token.line)).toEqual([1, 3, 4]);
+    expect(err.errors[0]).toBe(err);
+  });
+
+  test("errors that do not abort the rule are still reported", () => {
+    expect(fail("1 = 2;").message).toBe("Invalid assignment target.");
+    expect(fail("try { print(1); }").message).toBe("Expect 'catch' after try block.");
+    const args = Array.from({ length: 256 }, (_, i) => String(i)).join(", ");
+    expect(fail(`f(${args});`).message).toBe("Can't have more than 255 arguments.");
+  });
+
+  test("an exponent literal is a syntax error, not a silently dropped statement", () => {
+    expect(fail("print(1e3);").message).toBe("Expect ')' after expression.");
+  });
+
+  test("valid programs still parse", () => {
+    expect(parse("var x = 1;\nprint(x);")).toHaveLength(2);
+  });
 });

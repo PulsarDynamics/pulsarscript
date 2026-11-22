@@ -30,12 +30,22 @@ export class Parser {
         this.tokens = tokens;
     }
 
+    /** Syntax errors found so far. Parsing recovers after each one so all of them are reported. */
+    readonly errors: ParseError[] = [];
+
+    /**
+     * Parse the whole token stream. If any syntax error was found, throws the first
+     * ParseError, with every error found attached as `errors` (SPEC 5, defect D13).
+     */
     parse(): Stmt[] {
         const statements: Stmt[] = [];
         while (!this.isAtEnd()) {
-            let a = this.declaration()
-            //console.log("parsing:", a)
-            statements.push(a);
+            statements.push(this.declaration());
+        }
+        if (this.errors.length > 0) {
+            const first = this.errors[0];
+            first.errors = [...this.errors];
+            throw first;
         }
         return statements;
     }
@@ -459,8 +469,11 @@ export class Parser {
         throw this.error(this.peek(), message);
     }
 
+    /** Record a syntax error. Callers that cannot continue the current rule throw the result. */
     private error(token: Token, message: string): ParseError {
-        return new ParseError(token, message);
+        const err = new ParseError(token, message);
+        this.errors.push(err);
+        return err;
     }
 
     private synchronize(): void {
@@ -487,6 +500,8 @@ export class Parser {
 
 export class ParseError extends Error {
     token: Token;
+    /** Every syntax error in the source, in order; set on the error thrown by Parser.parse(). */
+    errors: ParseError[] = [];
 
     constructor(token: Token, message: string) {
         super(message);

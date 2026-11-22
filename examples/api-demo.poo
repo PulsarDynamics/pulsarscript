@@ -32,8 +32,8 @@ print(concat("IPC scan result: ", string(res)));
 print("=== Logical ops ===");
 var flagA = true;
 var flagB = false;
-print(concat("flagA and flagB = ", string(flagA and flagB)));
-print(concat("flagA or flagB = ", string(flagA or flagB)));
+print(concat("flagA and flagB = ", string(flagA && flagB)));
+print(concat("flagA or flagB = ", string(flagA || flagB)));
 print(concat("not flagA = ", string(!flagA)));
 
 print("=== Handler registration ===");
