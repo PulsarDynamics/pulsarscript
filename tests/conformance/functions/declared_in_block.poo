@@ -1,0 +1,4 @@
+{
+  function g() { return 7; }
+  print(g());
+}

@@ -70,10 +70,10 @@ Host bridges:
 
 ## Usage
 
-### Run the Test Program
+### Run the Demo Program
 
 ```bash
-bun run index.ts
+bun run demo          # set PULSARSCRIPT_DUMP=1 to also write tokens.json / statements.json
 ```
 
 ### Start the REPL
@@ -180,8 +180,12 @@ Call stack:
 
 ```
 pulsarscript/
-├── index.ts              # Main test program
+├── SPEC.md               # Language specification (v0) and defect register
+├── index.ts              # Demo program
 ├── repl.ts              # Interactive REPL
+├── compile.ts           # Bytecode compiler CLI (for the Go VM)
+├── BytecodeCompiler.ts  # AST -> bytecode
+├── Bytecode.ts          # Opcodes and chunk format
 ├── Lexer.ts             # Tokenization
 ├── Parser.ts            # AST generation
 ├── SemanticAnalyzer.ts  # Static analysis
@@ -189,24 +193,45 @@ pulsarscript/
 ├── ErrorReporter.ts     # Error formatting
 ├── classes/             # AST node classes
 ├── interfaces/          # Type definitions
-└── enums/               # Token types
+├── enums/               # Token types
+├── examples/            # Sample .poo scripts
+└── tests/
+    ├── unit/            # bun test: lexer, parser, compiler
+    ├── golden/          # golden bytecode (UPDATE_GOLDEN=1 bun test to regenerate)
+    └── conformance/     # language conformance suite (.poo + .expected)
 ```
 
 ## Documentation
 
+- [Language Specification](./SPEC.md) - Grammar, semantics, built-ins, bytecode format, known defects
 - [REPL Guide](./REPL.md) - Interactive shell documentation
 - [Error Reporting](./ERROR_REPORTING.md) - Enhanced error system details
 
 ## Development
 
-Built using [Bun](https://bun.sh) v1.1.12 - a fast all-in-one JavaScript runtime.
+Built with [Bun](https://bun.sh) 1.4 (pinned in CI) and TypeScript 5.6.
 
-### Running Tests
+### Checks
 
 ```bash
-bun run test          # Main test program
-bun run test-errors   # Error reporting tests
+bun install --frozen-lockfile
+bun run typecheck     # tsc --noEmit, must be clean
+bun test              # unit tests and golden bytecode
+bun run conformance   # conformance suite on the interpreter
 ```
+
+To also run the conformance suite on the Go VM, build `vmrun` from pulsaros-api and point at it:
+
+```bash
+(cd ../pulsaros-api && go build -o /tmp/vmrun ./cmd/vmrun)
+PULSARSCRIPT_VMRUN=/tmp/vmrun bun run conformance -- --require-vm
+```
+
+### Changing the language
+
+1. Update [SPEC.md](./SPEC.md).
+2. Add or change cases in `tests/conformance/` (`<name>.poo` + `<name>.expected`).
+3. Implement it. Known gaps are marked `// @xfail <runtime> <defect> <note>` in the case; when a fix makes one pass, the runner reports XPASS and fails until you remove the marker.
 
 ## License
 
