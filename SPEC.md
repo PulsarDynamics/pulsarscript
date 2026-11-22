@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0.3 records the language **as it behaves today** (November 2026; D1–D7, D9, D10, D13–D17 and D19 fixed). v0.2 settled the value model; v0.3 makes `hostapi.json` the one registry of built-ins and host calls (§8), so unknown functions fail at compile time, and bounds every run by default (§7). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.4 records the language **as it behaves today** (November 2026). Every defect found in the audit is fixed, decided or closed (D1–D19). v0.2 settled the value model, v0.3 made `hostapi.json` the one registry of built-ins and bounded every run, and v0.4 connects PulsarOS apps to their scripts end to end (§9) with reliable error lines (§10). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -185,7 +185,7 @@ A syntax error stops compilation. The parser recovers after each error so that *
 | Key | Value |
 | --- | --- |
 | `kind` | `"runtime"` (the only catchable kind in v0) |
-| `line` | source line of the failing operation, or `nil` when unknown (bytecode compiled without a line map, or ⚠ **D18**) |
+| `line` | source line of the failing operation (for an operator, the operator's line; for a call, the function name's line), or `nil` when the bytecode has no line map. (Fixed in D18.) |
 | `message` | human-readable description. The text is **not** part of the language yet and differs between runtimes (`"Division by zero."` vs `"division by zero"`); don't branch on it. |
 
 ```
@@ -297,9 +297,21 @@ Notes on the core functions:
 
 ## 9. Programs, handlers and the host
 
-- A program runs top to bottom. On the `vm`, top-level `function` declarations form the module's function table, and any of them can be invoked by the host as a **handler** (RPC or service mode).
-- An app declares its handlers in `AppManifest.json` (`script.bundle`, `script.exports`, `script.services`). The host checks that each declared handler exists.
-- Host calls run with the app's permissions. IPC sends are checked against the app's allowed channels and operations and are rate-limited.
+- A program runs top to bottom. Its top-level code calls `registerHandler(name, functionName)` for each function the host may invoke; only registered handlers can be called.
+- An app declares its script in `AppManifest.json` (fixed in D12; one shape for the PulsarOS frontend, `appbundle` and the API loader, schema in pulsaros-api `docs/app_manifest.schema.json`):
+
+  ```json
+  "permissions": { "scopes": ["fs.list"] },
+  "script": {
+    "bundle": "scripts/app.json",
+    "source": "scripts/app.poo",
+    "handlers": [ { "name": "analyze", "mode": "rpc" }, { "name": "watcher", "mode": "service" } ]
+  }
+  ```
+
+  `appbundle` checks that the declared handlers and the registered ones match. The legacy `exports`/`services` forms are still read, with a warning.
+- **Calling a handler** (fixed in D11): the app sends the IPC envelope `{v: 1, deviceId, processId, channel: "ipc.call", op: "script.call", payload: {appId, handler, args}, nonce, ts}` to the API's `/api/ipc`; services use `script.service.start`, `stop` and `status`. A non-list `args` is the handler's one argument; a list is the argument list. Arguments and results convert between JSON and PulsarScript values in both directions, objects and arrays included. An app can always call its own handlers and no other app's.
+- Handlers run with the app's identity and permissions. A script's `ipcSend(channel, op, payload)` reaches only the channels in the manifest's `permissions.scopes` (none without scopes), is rate-limited and raises a runtime error when refused or when the target fails. `ipcSetContext` cannot switch a server script to another device or process.
 
 ## 10. Bytecode format (v0)
 
@@ -319,7 +331,7 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 
 - `lineMap[i]` is the source line for `code[i]`, present when compiled with `-s`.
 
-> ⚠ **D18**: the compiler only updates its current line at `var` statements, and jump placeholders add no `lineMap` entries, so line numbers in `vm` runtime errors are unreliable.
+- `lineMap` has exactly one entry per `code` element. Each instruction maps to the line of the AST node that emitted it, and the VM reports the line of the instruction being executed. (Fixed in D18: the line only advanced at `var` statements, and jump placeholders added no entries, so the map drifted.)
 - There is no version field yet. Phase 1 adds a header `{format, version, compiler, sourceHash}`, and the loader will reject unknown versions.
 - `YIELD`, `SLEEP`, `EMIT_EVENT` and `POLL_EVENT` exist in the VM but are never emitted by the compiler in v0.
 
@@ -343,12 +355,12 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 | D8 | `loadModule` whitelisted but does nothing | vm | **Closed** (v0.3): removed from the registry; modules are Phase 3 |
 | D9 | Disassembler mis-decodes `CALL` | vmrun | **Fixed** |
 | D10 | No default step/time budget in `vmrun` and `runSource` | both | **Fixed** (v0.3): default budgets everywhere; budget errors are not catchable |
-| D11 | PulsarOS frontend script calls cannot reach the API | integration | Open: Phase 4 |
-| D12 | App manifest `script` shape differs between frontend and API | integration | Open: Phase 4 |
+| D11 | PulsarOS frontend script calls cannot reach the API | integration | **Fixed** (v0.4): real envelope to the connected server; JSON values both ways; nested `ipcSend` without deadlock |
+| D12 | App manifest `script` shape differs between frontend and API | integration | **Fixed** (v0.4): one `script.handlers` shape and schema; reference apps ship compiled bundles |
 | D13 | Syntax errors were swallowed; statements silently dropped | both | **Fixed** |
 | D14 | Number formatting (`-0`, exponent form) | vm | **Fixed** |
 | D15 | `arrayPush`/`arrayPop` do not mutate the variable's array | vm | **Decided** (v0.2): value semantics is the rule; the `vm` already complied |
 | D16 | `&&`/`\|\|`: no short-circuit (interp), stack underflow (vm) | both | **Fixed** |
 | D17 | Arrays and objects print as `<?>` | vm | **Fixed** (v0.2) |
-| D18 | Line map only tracks `var` statements; runtime error lines unreliable | vm | Open: Phase 1 |
+| D18 | Line map only tracks `var` statements; runtime error lines unreliable | vm | **Fixed** (v0.4) |
 | D19 | `return` inside `try` caught as an error (interp); stale handler after `return` inside `try`, and no frame unwinding for errors in nested calls (vm) | both | **Fixed** |

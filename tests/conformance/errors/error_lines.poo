@@ -1,0 +1,27 @@
+// Caught errors report the line of the failing operation on both runtimes (SPEC 7, D18).
+function div(a, b) {
+  return a / b;
+}
+try { print(1 / 0); } catch (e) { print(objGet(e, "line")); }
+try {
+  div(1, 0);
+} catch (e) { print(objGet(e, "line")); }
+try {
+  abs(
+    "x");
+} catch (e) { print(objGet(e, "line")); }
+if (true) {
+  try { len(5); } catch (e) { print(objGet(e, "line")); }
+}
+var n = 0;
+while (n < 1) {
+  n = n + 1;
+  try { n = n / 0; } catch (e) { print(objGet(e, "line")); }
+}
+for (var i = 0; i < 1; i = i + 1) {
+  try {
+    print(
+      10 /
+      0);
+  } catch (e) { print(objGet(e, "line")); }
+}

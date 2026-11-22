@@ -152,3 +152,24 @@ describe("compiler: structural invariants", () => {
     expect(decode(compile("print(typeOf(1));\n")).map((i) => i.op)).toContain(Opcode.HOST_CALL);
   });
 });
+
+describe("compiler: line map (D18)", () => {
+  test("has one entry per code word for every golden program", async () => {
+    for (const file of readdirSync(GOLDEN).filter((f) => f.endsWith(".poo"))) {
+      const chunk = compile(await Bun.file(join(GOLDEN, file)).text());
+      expect(chunk.lineMap!.length).toBe(chunk.code.length);
+    }
+  });
+
+  test("maps each instruction to the line of the node that emitted it", () => {
+    const chunk = compile("var a = 1;\nprint(\n  a /\n  0);\nif (a > 0) {\n  a = 2;\n}\n");
+    const div = chunk.code.indexOf(Opcode.DIV);
+    expect(chunk.lineMap![div]).toBe(3);
+    const print = chunk.code.indexOf(Opcode.PRINT);
+    expect(chunk.lineMap![print]).toBe(2);
+    const jif = chunk.code.indexOf(Opcode.JUMP_IF_FALSE);
+    expect(chunk.lineMap![jif]).toBe(5);
+    const setGlobal = chunk.code.indexOf(Opcode.SET_GLOBAL);
+    expect(chunk.lineMap![setGlobal]).toBe(6);
+  });
+});

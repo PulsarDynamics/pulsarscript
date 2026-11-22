@@ -764,8 +764,10 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       return func.call(this, args);
     } catch (err) {
       // Built-ins raise errors without a source position; report them at the call.
-      if (err instanceof RuntimeError && !(err.token?.line > 0)) {
-        throw new RuntimeError(expr.paren, err.message, err.callStack);
+      if (err instanceof RuntimeError && !(err.token?.line > 0) && !(err instanceof BudgetError)) {
+        // The line of the function name, as the VM's line map reports it (D18).
+        const at = expr.callee instanceof Variable ? expr.callee.name : expr.paren;
+        throw new RuntimeError(at, err.message, err.callStack);
       }
       throw err;
     }
