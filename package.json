@@ -4,15 +4,16 @@
   "type": "module",
   "scripts": {
     "repl": "bun run repl.ts",
-    "test": "bun run index.ts",
+    "demo": "bun run index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p .",
+    "conformance": "bun run tests/conformance/run.ts",
     "test-errors": "bun run test-errors.ts",
-    "test-repl": "type test-repl.poo | bun repl.ts",
+    "test-repl": "bun repl.ts < examples/test-repl.poo",
     "compile": "bun run compile.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+    "@types/bun": "1.4.5",
+    "typescript": "5.6.3"
   }
 }

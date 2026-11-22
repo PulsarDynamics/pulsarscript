@@ -85,7 +85,7 @@ const errorReporter = new ErrorReporter(source);
 console.log("Phase 1: Lexical Analysis...");
 const lexer = new Lexer(source);
 const tokens = lexer.scanTokens();
-await Bun.write("./tokens.json", JSON.stringify(tokens, null, 2));
+if (process.env.PULSARSCRIPT_DUMP) await Bun.write("./tokens.json", JSON.stringify(tokens, null, 2));
 console.log(`✓ Generated ${tokens.length} tokens\n`);
 
 // Phase 2: Parsing
@@ -94,7 +94,7 @@ const parser = new Parser(tokens);
 let statements;
 try {
     statements = parser.parse();
-    await Bun.write("./statements.json", JSON.stringify(statements, null, 2));
+    if (process.env.PULSARSCRIPT_DUMP) await Bun.write("./statements.json", JSON.stringify(statements, null, 2));
     console.log(`✓ Generated ${statements.length} statements\n`);
 } catch (error) {
     if (error instanceof ParseError) {

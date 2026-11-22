@@ -61,7 +61,7 @@ Successfully implemented a fully-functional REPL (Read-Eval-Print Loop) for Puls
 repl.ts                 # Main REPL implementation
 REPL.md                 # User documentation
 QUICK_REFERENCE.md      # Quick syntax reference
-test-repl.poo          # Test script file
+examples/test-repl.poo # Test script file
 ```
 
 ### Key Classes and Methods
@@ -172,7 +172,7 @@ bun run test-repl      # Run test script through REPL
     "repl": "bun run repl.ts",
     "test": "bun run index.ts",
     "test-errors": "bun run test-errors.ts",
-    "test-repl": "type test-repl.poo | bun repl.ts"
+    "test-repl": "bun repl.ts < examples/test-repl.poo"
   }
 }
 ```
