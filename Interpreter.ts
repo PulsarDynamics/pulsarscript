@@ -8,6 +8,8 @@ import { FunctionStmt } from "./classes/FunctionStmt";
 import type { Grouping } from "./classes/Grouping";
 import type { IfStmt } from "./classes/IfStmt";
 import type { Literal } from "./classes/Literal";
+import type { ArrayExpr } from "./classes/ArrayExpr";
+import type { ObjectExpr } from "./classes/ObjectExpr";
 import type { PrintStmt } from "./classes/PrintStmt";
 import type { ReturnStmt } from "./classes/ReturnStmt";
 import type { Unary } from "./classes/Unary";
@@ -158,7 +160,7 @@ class PulsarFunction implements PulsarCallable {
 }
 
 // Main Interpreter class
-type InterpreterOptions = {
+export type InterpreterOptions = {
   strictTypes?: boolean;
   ipc?: IPCBridge;
   defaultDeviceId?: string;
@@ -171,7 +173,7 @@ type InterpreterOptions = {
 export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   private globals: Environment;
   private environment: Environment;
-  private options: Required<InterpreterOptions> = {
+  private options: InterpreterOptions & { strictTypes: boolean; modules: Record<string, any> } = {
     strictTypes: false,
     ipc: undefined,
     defaultDeviceId: undefined,
@@ -784,6 +786,22 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     const result = func.call(this, args);
     // Allow async returns from host bridges (fs/kv/ipc sendAsync callbacks)
     return result instanceof Promise ? result : result;
+  }
+
+  // Arrays and objects are supported by the bytecode compiler and Go VM, but not yet by this
+  // tree-walking interpreter (defect D4). Raise a catchable runtime error instead of crashing.
+  visitArrayExpr(_expr: ArrayExpr): any {
+    throw this.createRuntimeError(
+      { type: TokenType.LEFT_BRACKET, lexeme: "[", literal: null, line: 0 } as Token,
+      "Array literals are not supported by the interpreter yet (D4); use the bytecode compiler and Go VM."
+    );
+  }
+
+  visitObjectExpr(_expr: ObjectExpr): any {
+    throw this.createRuntimeError(
+      { type: TokenType.LEFT_BRACE, lexeme: "{", literal: null, line: 0 } as Token,
+      "Object literals are not supported by the interpreter yet (D4); use the bytecode compiler and Go VM."
+    );
   }
 
   visitTryCatchStmt(stmt: TryCatchStmt): void {

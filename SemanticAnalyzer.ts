@@ -14,6 +14,11 @@ import type { Unary } from "./classes/Unary";
 import type { VarStmt } from "./classes/VarStmt";
 import { Variable } from "./classes/Variable";
 import type { WhileStmt } from "./classes/WhileStmt";
+import type { ArrayExpr } from "./classes/ArrayExpr";
+import type { ObjectExpr } from "./classes/ObjectExpr";
+import type { TryCatchStmt } from "./classes/TryCatchStmt";
+import type { ErrorExpr } from "./classes/ErrorExpr";
+import { TokenType } from "./enums/TokenType";
 import type { Expr } from "./interfaces/Expr";
 import type { ExprVisitor } from "./interfaces/ExprVisitor";
 import type { Stmt } from "./interfaces/Stmt";
@@ -191,6 +196,39 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       // You could add type checking here if MiniScript had static types
     }
   
+    visitArrayExpr(expr: ArrayExpr): void {
+      for (const element of expr.elements) {
+        this.analyzeExpr(element);
+      }
+    }
+
+    visitObjectExpr(expr: ObjectExpr): void {
+      for (const prop of expr.properties) {
+        this.analyzeExpr(prop.value);
+      }
+    }
+
+    visitErrorExpr(_expr: ErrorExpr): void {
+      // Error nodes carry no sub-expressions to analyze.
+    }
+
+    visitTryCatchStmt(stmt: TryCatchStmt): void {
+      this.beginScope();
+      for (const s of stmt.tryBlock) {
+        this.analyzeStmt(s);
+      }
+      this.endScope();
+      this.beginScope();
+      if (stmt.catchParam !== null) {
+        const tok = { type: TokenType.IDENTIFIER, lexeme: stmt.catchParam, literal: null, line: 0 } as Token;
+        this.declareVariable(tok);
+      }
+      for (const s of stmt.catchBlock) {
+        this.analyzeStmt(s);
+      }
+      this.endScope();
+    }
+
     private declareVariable(name: Token): void {
       if (this.environment.existsInCurrentScope(name)) {
         throw new SemanticError(name, "Variable with this name already declared in this scope.");
