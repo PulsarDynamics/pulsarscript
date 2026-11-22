@@ -660,6 +660,14 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   visitBinaryExpr(expr: Binary): any {
+    // && and || short-circuit and always produce a boolean (SPEC 4.4, D16).
+    if (expr.operator.type === TokenType.AND) {
+      return this.isTruthy(this.evaluate(expr.left)) && this.isTruthy(this.evaluate(expr.right));
+    }
+    if (expr.operator.type === TokenType.OR) {
+      return this.isTruthy(this.evaluate(expr.left)) || this.isTruthy(this.evaluate(expr.right));
+    }
+
     const left = this.evaluate(expr.left);
     const right = this.evaluate(expr.right);
 
@@ -741,12 +749,6 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         return !this.isEqual(left, right);
       case TokenType.EQUAL_EQUAL:
         return this.isEqual(left, right);
-      case TokenType.AND:
-        if (!this.isTruthy(left)) return left;
-        return right;
-      case TokenType.OR:
-        if (this.isTruthy(left)) return left;
-        return right;
     }
 
     return null;

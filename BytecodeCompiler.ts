@@ -444,21 +444,31 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     this.nextLocal = startLocal;
   }
 
+  // `a && b` and `a || b` short-circuit and always produce a boolean (SPEC 4.4, D16).
+  // The VM's JUMP_IF_FALSE pops its condition, so the result is rebuilt on each path:
+  //   a && b:  a; JIF Lfalse; b; NOT; NOT; JUMP Lend; Lfalse: CONST false; Lend:
+  //   a || b:  a; JIF Lright; CONST true; JUMP Lend; Lright: b; NOT; NOT; Lend:
   private emitLogicalAnd(expr: Binary) {
     expr.left.accept(this);
-    const jumpIfFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    this.emit(Opcode.POP);
+    const toFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
     expr.right.accept(this);
-    this.patchJump(jumpIfFalse);
+    this.emit(Opcode.NOT);
+    this.emit(Opcode.NOT);
+    const toEnd = this.emitPlaceholder(Opcode.JUMP);
+    this.patchJump(toFalse);
+    this.emit(Opcode.CONST, this.addConstant(false));
+    this.patchJump(toEnd);
   }
 
   private emitLogicalOr(expr: Binary) {
     expr.left.accept(this);
-    const jumpIfFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    const jumpOverRight = this.emitPlaceholder(Opcode.JUMP);
-    this.patchJump(jumpIfFalse);
-    this.emit(Opcode.POP);
+    const toRight = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
+    this.emit(Opcode.CONST, this.addConstant(true));
+    const toEnd = this.emitPlaceholder(Opcode.JUMP);
+    this.patchJump(toRight);
     expr.right.accept(this);
-    this.patchJump(jumpOverRight);
+    this.emit(Opcode.NOT);
+    this.emit(Opcode.NOT);
+    this.patchJump(toEnd);
   }
 }
