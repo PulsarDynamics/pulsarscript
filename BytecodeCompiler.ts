@@ -18,6 +18,7 @@ import { WhileStmt } from "./classes/WhileStmt";
 import { ForStmt } from "./classes/ForStmt";
 import { ReturnStmt } from "./classes/ReturnStmt";
 import { FunctionStmt } from "./classes/FunctionStmt";
+import { SemanticError } from "./SemanticAnalyzer";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr } from "./classes/ObjectExpr";
@@ -36,6 +37,13 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   hoisted: Set<string> = new Set();
   /** CALL operands emitted before their callee was compiled; patched in compile(). */
   callFixups: { operandPos: number; name: string }[] = [];
+  /** Every top-level `var` name in the file, collected up front: these are the globals (SPEC 6, D1). */
+  globalNames: Set<string> = new Set();
+  /** Globals declared so far, to reject a second top-level `var` of the same name. */
+  declaredGlobals: Set<string> = new Set();
+  /** Nesting depth of function bodies and try blocks being compiled. */
+  functionDepth = 0;
+  tryDepth = 0;
   currentLine = 1; // Track current source line for error mapping
 
   static compile(statements: Stmt[]): Chunk {
@@ -48,6 +56,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Hoist: every top-level function is callable from anywhere in the file (SPEC 4.6, D2).
     for (const stmt of statements) {
       if (stmt instanceof FunctionStmt) this.hoisted.add(stmt.name.lexeme);
+      if (stmt instanceof VarStmt) this.globalNames.add(stmt.name.lexeme);
     }
     for (const stmt of statements) {
       stmt.accept(this);
@@ -98,8 +107,23 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     } else {
       this.emit(Opcode.CONST, this.addConstant(null));
     }
+    if (this.isTopLevel()) {
+      // Top-level variables are globals, visible inside every function (SPEC 6, D1).
+      const name = stmt.name.lexeme;
+      if (this.declaredGlobals.has(name)) {
+        throw new SemanticError(stmt.name, "Variable with this name already declared in this scope.");
+      }
+      this.declaredGlobals.add(name);
+      this.emit(Opcode.DEFINE_GLOBAL, this.addConstant(name));
+      return;
+    }
     const slot = this.declareLocal(stmt.name.lexeme);
     this.emit(Opcode.SET_LOCAL, slot);
+  }
+
+  /** True outside every function body, block and try block: where a `var` declares a global. */
+  private isTopLevel(): boolean {
+    return this.functionDepth === 0 && this.tryDepth === 0 && this.scopeStack.length === 1;
   }
   visitBlockStmt(stmt: any): void {
     const startLocal = this.nextLocal;
@@ -190,9 +214,11 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.declareLocal(p.lexeme);
     }
     // Compile body
+    this.functionDepth++;
     for (const st of stmt.body) {
       st.accept(this);
     }
+    this.functionDepth--;
     // Ensure return nil
     this.emit(Opcode.CONST, this.addConstant(null));
     this.emit(Opcode.RETURN);
@@ -225,10 +251,12 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Emit TRY_PUSH with placeholder offset to catch block
     const tryPushPos = this.emitPlaceholder(Opcode.TRY_PUSH);
 
-    // Compile try block
+    // Compile try block (a `var` here stays local, not global)
+    this.tryDepth++;
     for (const s of stmt.tryBlock) {
       s.accept(this);
     }
+    this.tryDepth--;
 
     // Pop exception handler (no exception occurred)
     this.emit(Opcode.TRY_POP);
@@ -353,6 +381,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(Opcode.GET_LOCAL, local);
       return;
     }
+    if (!this.globalNames.has(expr.name.lexeme)) {
+      throw new SemanticError(expr.name, "Variable is not defined.");
+    }
     const nameIdx = this.addConstant(expr.name.lexeme);
     this.emit(Opcode.GET_GLOBAL, nameIdx);
   }
@@ -363,6 +394,10 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(Opcode.SET_LOCAL, local);
       this.emit(Opcode.GET_LOCAL, local);
     } else {
+      if (!this.globalNames.has(expr.name.lexeme)) {
+        // Assigning an undeclared name is an error, not an implicit global (SPEC 4.5, D3).
+        throw new SemanticError(expr.name, "Cannot assign to undefined variable.");
+      }
       const nameIdx = this.addConstant(expr.name.lexeme);
       this.emit(Opcode.SET_GLOBAL, nameIdx);
       // Leave the assigned value on the stack to support expression contexts

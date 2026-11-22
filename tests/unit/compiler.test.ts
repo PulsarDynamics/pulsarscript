@@ -113,13 +113,25 @@ describe("compiler: structural invariants", () => {
     expect(fn.locals).toBe(3);
   });
 
-  test("current behaviour: top-level var compiles to a local slot (D1)", () => {
-    const ops = decode(compile("var x = 1;\n")).map((i) => i.op);
-    expect(ops).toContain(Opcode.SET_LOCAL);
-    expect(ops).not.toContain(Opcode.DEFINE_GLOBAL);
+  test("top-level var compiles to DEFINE_GLOBAL; functions read it with GET_GLOBAL (D1)", () => {
+    const ops = decode(compile("var x = 1;\nfunction f() { return x; }\n")).map((i) => i.op);
+    expect(ops).toContain(Opcode.DEFINE_GLOBAL);
+    expect(ops).toContain(Opcode.GET_GLOBAL);
+    expect(ops).not.toContain(Opcode.SET_LOCAL);
   });
 
-  test.todo("SPEC: top-level var compiles to DEFINE_GLOBAL (D1)");
+  test("vars in blocks, functions and try blocks stay local (D1)", () => {
+    for (const src of ["{ var b = 1; print(b); }", "function f() { var c = 1; return c; }", "try { var t = 1; } catch (e) { }"]) {
+      const ops = decode(compile(src)).map((i) => i.op);
+      expect(ops).not.toContain(Opcode.DEFINE_GLOBAL);
+    }
+  });
+
+  test("unknown names and duplicate globals are compile-time errors (D3)", () => {
+    expect(() => compile("print(nope);")).toThrow("Variable is not defined.");
+    expect(() => compile("nope = 1;")).toThrow("Cannot assign to undefined variable.");
+    expect(() => compile("var x = 1;\nvar x = 2;")).toThrow("already declared");
+  });
 
   test("a call to a later-declared function compiles as CALL to its address (D2)", () => {
     const chunk = compile("function a() { return b(); }\nfunction b() { return 1; }\n");

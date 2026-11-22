@@ -11,7 +11,7 @@ import type { Literal } from "./classes/Literal";
 import type { PrintStmt } from "./classes/PrintStmt";
 import type { ReturnStmt } from "./classes/ReturnStmt";
 import type { Unary } from "./classes/Unary";
-import type { VarStmt } from "./classes/VarStmt";
+import { VarStmt } from "./classes/VarStmt";
 import { Variable } from "./classes/Variable";
 import type { WhileStmt } from "./classes/WhileStmt";
 import type { ArrayExpr } from "./classes/ArrayExpr";
@@ -49,9 +49,17 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   
     /** Top-level functions declared up front so they can be called before their declaration (D2). */
     private hoisted = new Set<FunctionStmt>();
+    /** Top-level `var` names: globals that function bodies may use even if declared later (SPEC 6, D1). */
+    private topLevelVars = new Set<string>();
+
+    /** Inside a function body, a top-level variable declared anywhere in the file is in scope. */
+    private isLaterGlobal(name: Token): boolean {
+      return this.currentFunction !== FunctionType.NONE && this.topLevelVars.has(name.lexeme);
+    }
 
     analyze(statements: Stmt[]): void {
       for (const statement of statements) {
+        if (statement instanceof VarStmt) this.topLevelVars.add(statement.name.lexeme);
         if (statement instanceof FunctionStmt) {
           this.declareVariable(statement.name);
           this.environment.defineFunction(statement.name, statement);
@@ -90,14 +98,14 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   
   visitVariableExpr(expr: Variable): void {
     // Allow reference to built-in globals (standard library) by whitelisting names.
-    if (!this.environment.isDefined(expr.name) && !SemanticAnalyzer.isBuiltin(expr.name.lexeme)) {
+    if (!this.environment.isDefined(expr.name) && !SemanticAnalyzer.isBuiltin(expr.name.lexeme) && !this.isLaterGlobal(expr.name)) {
         throw new SemanticError(expr.name, "Variable is not defined.");
     }
   }
 
   visitAssignExpr(expr: Assign): void {
     this.analyzeExpr(expr.value);
-    if (!this.environment.isDefined(expr.name)) {
+    if (!this.environment.isDefined(expr.name) && !this.isLaterGlobal(expr.name)) {
         throw new SemanticError(expr.name, "Cannot assign to undefined variable.");
     }
   }
