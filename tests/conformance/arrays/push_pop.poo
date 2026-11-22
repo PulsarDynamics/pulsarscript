@@ -1,6 +1,9 @@
-// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
-// @xfail vm D15 arrayPush/arrayPop do not mutate the array value in place (value semantics); unspecified
+// Arrays are values: arrayPush/arrayPop return results and never change their argument (SPEC 3.3, D15).
 var a = [1];
-arrayPush(a, 2, 3);
+var b = arrayPush(a, 2, 3);
 print(arrayLen(a));
-print(arrayPop(a));
+print(arrayLen(b));
+print(arrayPop(b));
+print(arrayLen(b));
+a = arrayPush(a, 9);
+print(a);

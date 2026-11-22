@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0.1 records the language **as it behaves today** (November 2026; D1, D2, D13 and D16 fixed, D3 in part). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.2 records the language **as it behaves today** (November 2026; D1, D2, D4, D6, D7, D13–D17 and D19 fixed, D3 in part). v0.2 settles the value model: arrays and objects are values, `+` concatenates with strings, and `catch` binds an error object. Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -54,8 +54,8 @@ There is no `%`, `.`, `+=`/`-=`, `++`/`--` or ternary `?:` in v0. Any other char
 | string | `"text"` | `"string"` | immutable |
 | boolean | `true`, `false` | `"boolean"` | |
 | nil | `nil` | `"nil"` | the absence of a value; uninitialised variables and functions without a return value produce `nil` |
-| array | `[1, "a", true]` | `"array"` | `vm` only (⚠ **D4** for `interp`) |
-| object | `{name: "x", n: 1}` | `"object"` | `vm` only (⚠ **D4**); keys are identifiers, values are any expression |
+| array | `[1, "a", true]` | `"array"` | ordered list of any values |
+| object | `{name: "x", n: 1}` | `"object"` | string keys to any values; keys in a literal are identifiers, a repeated key keeps the last value |
 
 There are no function values in v0: functions cannot be stored in variables, passed as arguments or returned (planned for Phase 2).
 
@@ -65,10 +65,32 @@ There are no function values in v0: functions cannot be stored in variables, pas
 
 ### 3.2 Printing values
 
-`print(expr)` writes one line. Numbers print in the shortest form that round-trips (as in JavaScript): `5`, `3.5`, `0.30000000000000004`, `3628800`. Booleans print as `true`/`false`, `nil` as `nil`, strings without quotes.
+`print(expr)` writes one line. `string(v)`, `concat(…)` and `+` with a string use the same printed form.
 
-> ⚠ **D14**: the `vm` prints `-0` for negative zero and uses exponent form for large values (`3.6288e+06`). It must match the rule above.
-> ⚠ **D17**: the `vm` prints arrays and objects as `<?>`. The required format is not specified yet (Phase 2).
+- **Numbers** print as JavaScript prints them: the shortest form that round-trips, `5`, `3.5`, `0.30000000000000004`, `3628800`; exponent form from `1e21` up and below `1e-6` (`1e+21`, `1e-7`); `NaN`, `Infinity`, `-Infinity`. Negative zero prints as `0`. (Fixed on the `vm` in D14.)
+- **Booleans** print as `true`/`false`, **nil** as `nil`, **strings** as their text without quotes.
+- **Arrays** print as `[e1, e2]`: elements separated by `, `, strings inside quoted with JSON escapes. `[]` when empty.
+- **Objects** print as `{k: v}` with keys in sorted order (by code unit). A key that is an identifier prints bare; any other key is quoted. Values follow the array rule. `{}` when empty.
+
+```
+print([1, "two", nil, [3.5]]);          // [1, "two", nil, [3.5]]
+print({b: 2, a: "x"});                  // {a: "x", b: 2}
+print(objSet({}, "with space", 1));     // {"with space": 1}
+```
+
+(Fixed on the `vm` in D17, which printed `<?>`; implemented on `interp` in D4.)
+
+### 3.3 Arrays and objects are values
+
+Arrays and objects have **value semantics**: no operation changes an existing array or object. The `array*`/`obj*` built-ins (§8) return a new array or object, so the result must be assigned:
+
+```
+var a = [1];
+var b = arrayPush(a, 2);   // a is still [1]; b is [1, 2]
+a = arrayPush(a, 3);       // to "append", assign the result
+```
+
+`arrayPop(a)` returns the last element (or `nil`) and does not shorten `a`; use `arraySlice(a, 0, arrayLen(a) - 1)` for the rest. There is no indexing syntax in v0 (`a[i]`, `o.k`). (D15: decided as value semantics, matching what the `vm` already did; the alternative, shared mutable references, would make every host boundary and handler call share state.)
 
 ## 4. Expressions
 
@@ -91,17 +113,13 @@ There are no function values in v0: functions cannot be stored in variables, pas
 
 `+ - * /` on two numbers have IEEE-754 semantics, **except that division by zero is a runtime error** in both runtimes. Unary `-` negates a number.
 
-`+` with a string operand:
+**`+` concatenates when either operand is a string**, converting the other operand to its printed form (§3.2): `"a" + 1` → `"a1"`, `"v: " + nil` → `"v: nil"`, `"xs: " + [1]` → `"xs: [1]"`. `+` is left-associative, so `1 + 2 + "x"` is `"3x"` and `"x" + 1 + 2` is `"x12"`. (Fixed in D6.)
 
-> ⚠ **D6** (decision pending): `interp` concatenates (`"a" + 1` → `"a1"`); `vm` raises a runtime error for any `+` involving a string, **including `"foo" + "bar"`**. Recommended rule: `+` concatenates when either operand is a string, converting the other with `string()`. Until decided, use `concat()`, which behaves the same in both runtimes.
-
-Arithmetic on any other non-number is a runtime error.
-
-> ⚠ **D6**: in non-strict mode `interp` coerces silently instead (`abs("x")` → `NaN`). `interp` has a `strictTypes` option that raises errors; `vm` always behaves strictly.
+Any other arithmetic on a non-number, such as `true + 1` or `-"a"`, is a runtime error, and so is passing the wrong type to a built-in (`abs("x")`). `interp` keeps a `strictTypes: false` option for old embedders that coerces built-in arguments instead; it is off by default and outside the language.
 
 ### 4.3 Comparison and equality
 
-`< <= > >=` compare two numbers. `==` and `!=` compare type and value, with **no type coercion**: `1 == "1"` is `false`, and `nil == false` is `false`.
+`< <= > >=` compare two numbers. `==` and `!=` compare type and value, with **no type coercion**: `1 == "1"` is `false`, and `nil == false` is `false`. **Arrays and objects compare by contents**, recursively: `[1, [2]] == [1, [2]]` and `{a: 1, b: 2} == {b: 2, a: 1}` are `true`. `arrayIndexOf` uses the same equality.
 
 ### 4.4 Logical operators
 
@@ -159,9 +177,21 @@ A syntax error stops compilation. The parser recovers after each error so that *
 | Semantic | undefined variable, assignment to an undeclared name, duplicate declaration | compile-time on both runtimes (unknown *function* names: runtime on the `vm`, ⚠ **D3**) |
 | Runtime | type errors, division by zero, unknown host call, stack overflow, budget exceeded | unwinds to the nearest `try`; uncaught, the program stops with a message and source line |
 
-`try { A } catch (e) { B }`: if a runtime error occurs in `A`, execution continues in `B` with `e` bound to the error. Errors that occur before execution (lexical, syntax, semantic) cannot be caught.
+`try { A } catch (e) { B }`: if a runtime error occurs in `A`, including inside any function called from `A`, the calls are unwound and execution continues in `B` with `e` bound to the error. Errors that occur before execution (lexical, syntax, semantic) cannot be caught, and neither can running out of the step or time budget.
 
-> ⚠ **D7**: the value bound to `e` is unspecified: `vm` binds the message string; `interp` binds an internal object that prints as `[object Object]`. Target: an object with `message`, `kind` and `line`.
+**The caught value** is an object (fixed in D7):
+
+| Key | Value |
+| --- | --- |
+| `kind` | `"runtime"` (the only catchable kind in v0) |
+| `line` | source line of the failing operation, or `nil` when unknown (bytecode compiled without a line map, or ⚠ **D18**) |
+| `message` | human-readable description. The text is **not** part of the language yet and differs between runtimes (`"Division by zero."` vs `"division by zero"`); don't branch on it. |
+
+```
+try { var x = 1 / 0; } catch (e) { print(objGet(e, "kind") + " at line " + objGet(e, "line")); }
+```
+
+`return` inside `try` returns from the function normally; it is not caught, and it leaves no handler behind. (Fixed in D19: `interp` caught `return` as an error, and the `vm` kept the handler of a function that returned from inside `try` and did not unwind calls made inside `try`.)
 
 **Limits.** Recursion beyond the call-depth limit is a runtime error (`vm`: 256 frames by default; stack depth 1024). Every execution must have a step and time budget.
 
@@ -171,25 +201,28 @@ A syntax error stops compilation. The parser recovers after each error so that *
 
 Built-ins are called like functions. On the `vm` each call is a `HOST_CALL` checked against a whitelist (name, arity, argument kinds). On `interp` they are native functions.
 
-> ⚠ **D5**: the two runtimes implement **different sets**: only 16 names exist in both, and several whitelisted `vm` names are not implemented by `vmrun` (they return `nil`). The interpreter's analyzer also rejects some of the interpreter's own natives. Phase 1 replaces both lists with one registry (`hostapi.yaml`). Until then, portable scripts should use only the ✓/✓ rows.
+> ⚠ **D5**: the two runtimes still implement **different sets**: the math, string-utility, parsing and clock built-ins are not allowed on the `vm`, and the analyzer rejects the host-defined `kv*`/`fs*`/`ipc*` names on `interp`. Phase 1 replaces both lists with one registry (`hostapi.yaml`). Until then, portable scripts should use only the ✓/✓ rows.
 
-Results measured with `interp` (through the analyzer, as `runSource` does) and `vmrun` built from pulsaros-api `master`:
+Results measured with `interp` (through the analyzer, as `runSource` does) and `vmrun` built from pulsaros-api `master` with `phase1/vm-semantics`. The pure core built-ins (`typeOf`, `string`, `concat`, `number`, `abs`, `clamp`, `len`, `array*`, `obj*`) are implemented inside the VM, so every host gets them:
 
 | Built-in | `interp` | `vm` | Behaviour |
 | --- | --- | --- | --- |
 | `typeOf(v)` | ✓ | ✓ | type name (§3) |
-| `string(v)` | ✓ | ✓ | printable form |
-| `len(s)` | ✓ | ✓ | string length |
+| `string(v)` | ✓ | ✓ | printed form (§3.2) |
+| `len(v)` | ✓ | ✓ | length of a string in Unicode code points (`len("héllo")` is 5), or of an array |
 | `concat(…)` | ✓ | ✓ | joins the printed forms of all arguments |
 | `randomInt(a, b)` | ✓ | ✓ | integer in `[a, b]` |
-| `number(s)` | ✓ | returns `nil` | parse a number |
-| `abs(n)`, `clamp(n, lo, hi)` | ✓ | returns `nil` | |
+| `number(v)` | ✓ | ✓ | numbers as-is; `true`/`false` → `1`/`0`; a string that is a decimal literal (optional sign, fraction and exponent, surrounding whitespace) → that number; anything else, including `""`, `"0x10"` and `"12px"`, → `nil` |
+| `abs(n)`, `clamp(n, lo, hi)` | ✓ | ✓ | |
 | `floor` `ceil` `round` `sqrt` `pow` `min` `max` | ✓ | not allowed | |
 | `toUpper` `toLower` `trim` `indexOf` `substr` | ✓ | not allowed | |
 | `parseInt` `parseFloat` `toNumberOr` `isInteger` `isFinite` | ✓ | not allowed | |
 | `clock()` `random()` | ✓ | not allowed | |
-| `arrayLen` `arrayPush` `arrayPop` `arraySlice` `arrayConcat` `arrayIndexOf` | rejected by analyzer | ✓ | ⚠ **D15**: `arrayPush`/`arrayPop` do not change the array held in a variable |
-| `objKeys` `objValues` `objHas` `objGet` `objSet` | rejected by analyzer | ✓ | |
+| `arrayLen(a)` `arrayPush(a, v, …)` `arrayPop(a)` | ✓ | ✓ | value semantics (§3.3): `arrayPush` returns a new array; `arrayPop` returns the last element or `nil` |
+| `arraySlice(a, start, end)` | ✓ | ✓ | elements `start` up to `end` (exclusive); indices truncate toward zero and clamp to the array; `start > end` gives `[]` |
+| `arrayConcat(a, b, …)` `arrayIndexOf(a, v)` | ✓ | ✓ | `arrayIndexOf` uses `==` (§4.3); `-1` when absent |
+| `objKeys(o)` `objValues(o)` | ✓ | ✓ | in sorted key order |
+| `objHas(o, k)` `objGet(o, k)` `objSet(o, k, v)` | ✓ | ✓ | `k` is converted with `string()`; `objGet` gives `nil` for a missing key; `objSet` returns a new object |
 | `kvGet` `kvSet` `kvDelete` | rejected by analyzer | host-defined | key-value store provided by the host |
 | `fsRead` `fsWrite` `fsList` `fsStat` `fsDelete` `fsExists` | rejected by analyzer | host-defined | sandboxed file access provided by the host |
 | `emitEvent` `pollEvent` | — | host-defined | event queue |
@@ -228,7 +261,7 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 
 ## 11. Conformance
 
-- `bun run conformance` runs every case on `interp`, and on the `vm` when `PULSARSCRIPT_VMRUN` points at a `vmrun` binary (`--require-vm` makes that mandatory).
+- `bun run conformance` runs every case on `interp`, and on the `vm` when `PULSARSCRIPT_VMRUN` points at a `vmrun` binary (`--require-vm` makes that mandatory). Cases are compiled with a line map (`-s`).
 - A case is `<name>.poo` plus `<name>.expected`: one line per printed value, then an optional `!error` or `!error: <kind>` line (`parse`, `semantic`, `runtime`, `compile`).
 - Known defects are marked in the case with `// @xfail <runtimes> <defect> <note>`. A marked case that starts passing fails the run until the marker is removed, so fixes are never silent.
 
@@ -239,18 +272,19 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 | D1 | Top-level variables compiled as locals; functions could not see globals | vm (interp: globals declared later) | **Fixed** |
 | D2 | Calls to functions declared later failed | both | **Fixed** |
 | D3 | Unknown names not caught at compile time | vm | **Partly fixed**: variables and assignments done; unknown function names need the host-call registry (Phase 1) |
-| D4 | Array and object literals unsupported | interp | Open: Phase 1 (or retire interp, A1) |
-| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | Open: Phase 1 (registry) |
-| D6 | `+` with strings and implicit coercion differ | both | Open: needs decision |
-| D7 | Caught error value unspecified | both | Open: needs decision |
+| D4 | Array and object literals unsupported | interp | **Fixed** (v0.2) |
+| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | **Partly fixed** (v0.2): core, `array*` and `obj*` built-ins exist on both; the rest waits for the registry (Phase 1) |
+| D6 | `+` with strings and implicit coercion differ | both | **Fixed** (v0.2): `+` concatenates with a string; `interp` strict by default |
+| D7 | Caught error value unspecified | both | **Fixed** (v0.2): `{kind, line, message}` |
 | D8 | `loadModule` whitelisted but does nothing | vm | Open: Phase 3 |
 | D9 | Disassembler mis-decodes `CALL` | vmrun | Open: Phase 1 |
 | D10 | No default step/time budget in `vmrun` and `runSource` | both | Open: Phase 1 |
 | D11 | PulsarOS frontend script calls cannot reach the API | integration | Open: Phase 4 |
 | D12 | App manifest `script` shape differs between frontend and API | integration | Open: Phase 4 |
 | D13 | Syntax errors were swallowed; statements silently dropped | both | **Fixed** |
-| D14 | Number formatting (`-0`, exponent form) | vm | Open: Phase 1 |
-| D15 | `arrayPush`/`arrayPop` do not mutate the variable's array | vm | Open: Phase 2 |
+| D14 | Number formatting (`-0`, exponent form) | vm | **Fixed** |
+| D15 | `arrayPush`/`arrayPop` do not mutate the variable's array | vm | **Decided** (v0.2): value semantics is the rule; the `vm` already complied |
 | D16 | `&&`/`\|\|`: no short-circuit (interp), stack underflow (vm) | both | **Fixed** |
-| D17 | Arrays and objects print as `<?>` | vm | Open: Phase 2 |
+| D17 | Arrays and objects print as `<?>` | vm | **Fixed** (v0.2) |
 | D18 | Line map only tracks `var` statements; runtime error lines unreliable | vm | Open: Phase 1 |
+| D19 | `return` inside `try` caught as an error (interp); stale handler after `return` inside `try`, and no frame unwinding for errors in nested calls (vm) | both | **Fixed** |

@@ -28,23 +28,18 @@ bun repl.ts
 - `.exit` or `.quit` - Exit the REPL
 - `.clear` - Clear the screen
 - `.reset` - Reset the interpreter state (clear all variables and functions)
-- `.strict [on|off]` - Toggle strict type mode
+- `.strict [on|off]` - Toggle checked built-in arguments (on by default)
 - `.history` - Show command history
 - `.multiline` - Enter multi-line mode for complex code blocks
 
 ### Strict Mode
 
-Enable strict typing:
-```
-» .strict on
-✓ Strict mode enabled
-```
+Strict mode is on by default and matches the production VM:
+- Arithmetic on non-numbers is a runtime error (`true + 1`)
+- `+` concatenates when either side is a string (`1 + "2"` is `"12"`)
+- Built-in functions check their argument types
 
-In strict mode:
-- Type coercion is disabled
-- `1 + "2"` will throw an error
-- Use `concat(1, "2")` for explicit concatenation
-- Built-in functions enforce type checking
+`.strict off` makes built-ins coerce their arguments instead. It exists for old embedders and is not part of the language.
 
 ### Multi-line Mode
 
@@ -115,13 +110,13 @@ Goodbye!
 The REPL provides detailed error messages with source context:
 
 ```pulsarscript
-» var x = 1 + "hello";
+» var x = true + 1;
 
 Runtime Error at line 1:
-PLUS: operands must both be numbers or both be strings in strict mode.
+Operands must be two numbers, or include a string.
 
->    1 | var x = 1 + "hello";
-                  ^
+>    1 | var x = true + 1;
+                     ^
 ```
 
 ## Tips

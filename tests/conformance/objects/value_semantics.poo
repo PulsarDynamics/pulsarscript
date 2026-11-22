@@ -1,0 +1,7 @@
+// objSet returns a new object; the original is unchanged (SPEC 3.3).
+var o = {a: 1};
+var p = objSet(o, "b", 2);
+print(objHas(o, "b"));
+print(objHas(p, "b"));
+print(objGet(o, "missing"));
+print(objValues({z: 1, y: 2}));

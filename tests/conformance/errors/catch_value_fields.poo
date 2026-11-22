@@ -1,0 +1,9 @@
+// The caught value is an object {kind, line, message} (SPEC 7, D7).
+try {
+  var x = 1 / 0;
+} catch (e) {
+  print(objGet(e, "kind"));
+  print(objGet(e, "line"));
+  print(typeOf(objGet(e, "message")));
+  print(objKeys(e));
+}

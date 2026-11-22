@@ -32,7 +32,7 @@ class REPL {
   private multiLineBuffer: string[] = [];
   private inMultiLineMode: boolean = false;
   private history: string[] = [];
-  private strictMode: boolean = false;
+  private strictMode: boolean = true;
 
   constructor() {
     this.interpreter = new Interpreter({ strictTypes: this.strictMode });

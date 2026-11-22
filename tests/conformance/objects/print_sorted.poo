@@ -1,0 +1,4 @@
+// Objects print with keys in sorted order (SPEC 3.2).
+print({b: 2, a: "x", c: {}});
+print({});
+print(objSet({}, "with space", 1));

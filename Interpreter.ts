@@ -27,6 +27,7 @@ import type { IOBridge } from "./interfaces/IO";
 import { ErrorExpr } from "./classes/ErrorExpr";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { CallFrame } from "./ErrorReporter";
+import { fromHost, isArray, isObject, sortedKeys, stringify, toHost, toNumber, typeName, valuesEqual } from "./Values";
 
 const RE_INTEGER_BASE10 = /^[+-]?\d+$/;
 const RE_INTEGER_OTHER = /^[+-]?[0-9a-z]+$/i;
@@ -44,7 +45,8 @@ export class RuntimeError extends Error {
   }
 }
 
-// Return exception for function returns
+// Return exception for function returns. It is control flow, not an error: try/catch must
+// never catch it (D19).
 class ReturnException extends Error {
   value: any;
 
@@ -173,8 +175,10 @@ export type InterpreterOptions = {
 export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   private globals: Environment;
   private environment: Environment;
+  // strictTypes defaults to true: arithmetic on non-numbers is a runtime error, as on the VM
+  // (SPEC §4.2). strictTypes: false restores the old coercing behaviour for built-in arguments.
   private options: InterpreterOptions & { strictTypes: boolean; modules: Record<string, any> } = {
-    strictTypes: false,
+    strictTypes: true,
     ipc: undefined,
     defaultDeviceId: undefined,
     defaultProcessId: undefined,
@@ -193,7 +197,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     this.environment = this.globals;
     if (options) {
       this.options = {
-        strictTypes: options.strictTypes ?? false,
+        strictTypes: options.strictTypes ?? true,
         ipc: options.ipc,
         defaultDeviceId: options.defaultDeviceId,
         defaultProcessId: options.defaultProcessId,
@@ -249,7 +253,8 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       if (!this.options.io) throw this.createRuntimeError(mkNativeToken("io"), "IO bridge not configured");
       return this.options.io;
     };
-    const wrapPromise = async (val: any) => (val instanceof Promise ? await val : val);
+    // Host results become language values; async results stay promises (resolved by the host).
+    const wrapPromise = (val: any) => (val instanceof Promise ? val.then(fromHost) : fromHost(val));
     const ensureIPC = () => {
       if (!this.ipcBridge) throw this.createRuntimeError(mkNativeToken("ipc"), "IPC bridge not configured");
       return this.ipcBridge;
@@ -270,7 +275,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         processId: String(proc),
         channel: String(channel),
         op: String(op),
-        payload,
+        payload: toHost(payload),
         nonce: typeof nonce === "string" && nonce.length > 0 ? nonce : this.generateNonce(),
         ts: Number.isFinite(ts) ? Number(ts) : Date.now(),
       };
@@ -282,28 +287,14 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         const msg = resp.error.message ? `${resp.error.code}: ${resp.error.message}` : resp.error.code;
         throw this.createRuntimeError(mkNativeToken(token), msg);
       }
-      return resp.result ?? null;
+      return fromHost(resp.result ?? null);
     };
 
     // Core / Types
-    defineNative("typeOf", 1, (v) => {
-      if (v === null) return "nil";
-      const t = typeof v;
-      if (t === "number" || t === "string" || t === "boolean") return t;
-      return "object";
-    });
+    defineNative("typeOf", 1, (v) => typeName(v));
 
     // Conversions
-    defineNative("number", 1, (v) => {
-      if (v === null) return null;
-      if (typeof v === "number") return v;
-      if (typeof v === "boolean") return v ? 1 : 0;
-      if (typeof v === "string") {
-        const n = Number(v);
-        return Number.isNaN(n) ? null : n;
-      }
-      return null;
-    });
+    defineNative("number", 1, (v) => toNumber(v));
     defineNative("string", 1, (v) => this.stringify(v));
 
     // Time / Random
@@ -332,7 +323,13 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     });
 
     // Strings
-    defineNative("len", 1, (s) => requireString("len", s).length);
+    // Length of a string in Unicode code points, or of an array (SPEC §8).
+    defineNative("len", 1, (s) => {
+      if (isArray(s)) return s.length;
+      if (typeof s === "string") return [...s].length;
+      if (this.options.strictTypes) throw this.createRuntimeError(mkNativeToken("len"), "len: expected string or array");
+      return [...String(s)].length;
+    });
     defineNative("toUpper", 1, (s) => requireString("toUpper", s).toUpperCase());
     defineNative("toLower", 1, (s) => requireString("toLower", s).toLowerCase());
     defineNative("trim", 1, (s) => requireString("trim", s).trim());
@@ -359,33 +356,52 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       return str.substring(i, Math.min(str.length, i + len));
     });
 
-    // Variadic concatenation (explicit string building in strict mode)
-    const concatToken = { type: TokenType.IDENTIFIER, lexeme: "concat", literal: null, line: 0 } as Token;
-    const concatCallable: PulsarCallable = {
-      arity: () => -1,
-      call: (_: Interpreter, args: any[]) => {
-        if (this.options.strictTypes) {
-          // In strict mode: all args must be string or number explicitly; number gets stringified, others error.
-          for (let i = 0; i < args.length; i++) {
-            const a = args[i];
-            if (typeof a === 'string') continue;
-            if (typeof a === 'number') {
-              args[i] = this.stringify(a);
-              continue;
-            }
-            throw this.createRuntimeError(concatToken, "concat: arguments must be string or number in strict mode");
-          }
-          return args.join("");
-        }
-        // Non-strict: stringify everything.
-        for (let i = 0; i < args.length; i++) {
-          args[i] = this.stringify(args[i]);
-        }
-        return args.join("");
-      },
-      toString: () => `<native concat>`
+    // Variadic concatenation of the printed forms of all arguments (same on the VM).
+    defineNative("concat", -1, (...args) => args.map((a) => this.stringify(a)).join(""));
+
+    // Arrays and objects (SPEC §3.3, §8). They are values: every function returns a new array
+    // or object and never changes its arguments. Mirrors the Go VM's implementations.
+    const requireArray = (name: string, v: any): any[] => {
+      if (isArray(v)) return v;
+      throw this.createRuntimeError(mkNativeToken(name), `${name}: expected array`);
     };
-    this.globals.define("concat", concatCallable);
+    const requireObject = (name: string, v: any): Map<string, any> => {
+      if (isObject(v)) return v;
+      throw this.createRuntimeError(mkNativeToken(name), `${name}: expected object`);
+    };
+    const requireIndex = (name: string, v: any): number => {
+      if (typeof v !== "number") throw this.createRuntimeError(mkNativeToken(name), `${name}: start and end must be numbers`);
+      return Math.trunc(v);
+    };
+    const key = (k: any): string => this.stringify(k);
+    defineNative("arrayLen", 1, (a) => requireArray("arrayLen", a).length);
+    defineNative("arrayPush", -1, (a, ...values) => {
+      if (values.length === 0) throw this.createRuntimeError(mkNativeToken("arrayPush"), "arrayPush: expected an array and at least one value");
+      return [...requireArray("arrayPush", a), ...values];
+    });
+    defineNative("arrayPop", 1, (a) => {
+      const arr = requireArray("arrayPop", a);
+      return arr.length === 0 ? null : arr[arr.length - 1];
+    });
+    defineNative("arraySlice", 3, (a, start, end) => {
+      const arr = requireArray("arraySlice", a);
+      const lo = Math.max(0, requireIndex("arraySlice", start));
+      const hi = Math.min(arr.length, requireIndex("arraySlice", end));
+      return lo > hi ? [] : arr.slice(lo, hi);
+    });
+    defineNative("arrayConcat", -1, (...arrays) => {
+      if (arrays.length < 2) throw this.createRuntimeError(mkNativeToken("arrayConcat"), "arrayConcat: expected at least 2 arrays");
+      return arrays.flatMap((a) => requireArray("arrayConcat", a));
+    });
+    defineNative("arrayIndexOf", 2, (a, v) => requireArray("arrayIndexOf", a).findIndex((x) => valuesEqual(x, v)));
+    defineNative("objKeys", 1, (o) => sortedKeys(requireObject("objKeys", o)));
+    defineNative("objValues", 1, (o) => {
+      const obj = requireObject("objValues", o);
+      return sortedKeys(obj).map((k) => obj.get(k));
+    });
+    defineNative("objHas", 2, (o, k) => requireObject("objHas", o).has(key(k)));
+    defineNative("objGet", 2, (o, k) => requireObject("objGet", o).get(key(k)) ?? null);
+    defineNative("objSet", 3, (o, k, v) => new Map(requireObject("objSet", o)).set(key(k), v));
 
     // Safe parsing utilities
     defineNative("parseInt", 2, (s, base) => {
@@ -430,7 +446,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       return null;
     });
     defineNative("ipcEnvelope", -1, (channel, op, payload, deviceId?, processId?, nonce?, ts?) => {
-      return normalizeEnvelope("ipcEnvelope", channel, op, payload, deviceId, processId, nonce, ts);
+      return fromHost(normalizeEnvelope("ipcEnvelope", channel, op, payload, deviceId, processId, nonce, ts));
     });
     defineNative("ipcSend", -1, (channel, op, payload, deviceId?, processId?, nonce?, ts?) => {
       const env = normalizeEnvelope("ipcSend", channel, op, payload, deviceId, processId, nonce, ts);
@@ -438,10 +454,10 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       return handleIPCResponse(resp, "ipcSend");
     });
     defineNative("ipcSendRaw", 1, (raw) => {
-      if (raw === null || typeof raw !== "object") {
+      if (raw === null || typeof raw !== "object" || isArray(raw)) {
         throw this.createRuntimeError(mkNativeToken("ipcSendRaw"), "ipcSendRaw: envelope object required");
       }
-      const envObj = raw as Partial<IPCEnvelope>;
+      const envObj = toHost(raw) as Partial<IPCEnvelope>;
       if (!envObj.channel || !envObj.op) {
         throw this.createRuntimeError(mkNativeToken("ipcSendRaw"), "ipcSendRaw: channel and op are required");
       }
@@ -457,10 +473,10 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       const errorCb = onError !== undefined && onError !== null ? ensureCallableValue("ipcSendAsync", onError) : null;
       const handle = (resp: IPCResponse | void) => {
         if (resp && resp.error && errorCb) {
-          errorCb.call(this, [resp.error]);
+          errorCb.call(this, [fromHost(resp.error)]);
           return;
         }
-        const val = resp ? resp.result ?? null : null;
+        const val = resp ? fromHost(resp.result ?? null) : null;
         if (resultCb) {
           resultCb.call(this, [val]);
         }
@@ -534,7 +550,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       const io = ensureIO();
       if (!io.kvSet) throw this.createRuntimeError(mkNativeToken("kvSet"), "kv storage not available");
       const k = requireString("kvSet", key);
-      return wrapPromise(io.kvSet(k, value));
+      return wrapPromise(io.kvSet(k, toHost(value)));
     });
     defineNative("kvDelete", 1, (key) => {
       const io = ensureIO();
@@ -684,23 +700,14 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         this.checkNumberOperands(expr.operator, left, right);
         return Number(left) - Number(right);
       case TokenType.PLUS:
-        if (this.options.strictTypes) {
-          if (typeof left === 'number' && typeof right === 'number') {
-            return (left as number) + (right as number);
-          }
-          if (typeof left === 'string' && typeof right === 'string') {
-            return (left as string) + (right as string);
-          }
-          throw this.createRuntimeError(expr.operator, "PLUS: operands must both be numbers or both be strings in strict mode.");
-        } else {
-          if (typeof left === 'number' && typeof right === 'number') {
-            return (left as number) + (right as number);
-          }
-          if (typeof left === 'string' || typeof right === 'string') {
-            return this.stringify(left) + this.stringify(right);
-          }
-          throw this.createRuntimeError(expr.operator, "Operands must be two numbers or strings.");
+        // Adds two numbers; concatenates printed forms when either side is a string (SPEC §4.2, D6).
+        if (typeof left === 'number' && typeof right === 'number') {
+          return left + right;
         }
+        if (typeof left === 'string' || typeof right === 'string') {
+          return this.stringify(left) + this.stringify(right);
+        }
+        throw this.createRuntimeError(expr.operator, "Operands must be two numbers, or include a string.");
       case TokenType.SLASH:
         if (this.options.strictTypes) {
           this.checkNumberOperands(expr.operator, left, right);
@@ -789,31 +796,35 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       );
     }
 
-    const result = func.call(this, args);
-    // Allow async returns from host bridges (fs/kv/ipc sendAsync callbacks)
-    return result instanceof Promise ? result : result;
+    try {
+      return func.call(this, args);
+    } catch (err) {
+      // Built-ins raise errors without a source position; report them at the call.
+      if (err instanceof RuntimeError && !(err.token?.line > 0)) {
+        throw new RuntimeError(expr.paren, err.message, err.callStack);
+      }
+      throw err;
+    }
   }
 
-  // Arrays and objects are supported by the bytecode compiler and Go VM, but not yet by this
-  // tree-walking interpreter (defect D4). Raise a catchable runtime error instead of crashing.
-  visitArrayExpr(_expr: ArrayExpr): any {
-    throw this.createRuntimeError(
-      { type: TokenType.LEFT_BRACKET, lexeme: "[", literal: null, line: 0 } as Token,
-      "Array literals are not supported by the interpreter yet (D4); use the bytecode compiler and Go VM."
-    );
+  visitArrayExpr(expr: ArrayExpr): any {
+    return expr.elements.map((e) => this.evaluate(e));
   }
 
-  visitObjectExpr(_expr: ObjectExpr): any {
-    throw this.createRuntimeError(
-      { type: TokenType.LEFT_BRACE, lexeme: "{", literal: null, line: 0 } as Token,
-      "Object literals are not supported by the interpreter yet (D4); use the bytecode compiler and Go VM."
-    );
+  visitObjectExpr(expr: ObjectExpr): any {
+    const obj = new Map<string, any>();
+    for (const prop of expr.properties) {
+      obj.set(prop.key, this.evaluate(prop.value));
+    }
+    return obj;
   }
 
   visitTryCatchStmt(stmt: TryCatchStmt): void {
     try {
       this.executeBlock(stmt.tryBlock, new Environment(this.environment));
     } catch (err) {
+      // `return` inside try is not an error (D19).
+      if (err instanceof ReturnException) throw err;
       const env = new Environment(this.environment);
       if (stmt.catchParam) {
         env.define(stmt.catchParam, this.errorToValue(err));
@@ -866,7 +877,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   private isEqual(a: any, b: any): boolean {
-    return a === b;
+    return valuesEqual(a, b);
   }
 
   private isCallable(value: any): boolean {
@@ -884,20 +895,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   private stringify(value: any): string {
-    if (value === null) return "nil";
-    if (typeof value === 'number') {
-      let text = value.toString();
-      if (text.endsWith('.0')) {
-        text = text.substring(0, text.length - 2);
-      }
-      return text;
-    }
-    if (typeof value === 'boolean') return value.toString();
-    if (typeof value === 'string') return value;
-    if (this.isCallable(value)) {
-      return (value as PulsarCallable).toString();
-    }
-    return String(value);
+    return stringify(value, (v) => (this.isCallable(v) ? (v as PulsarCallable).toString() : String(v)));
   }
 
   private generateNonce(): string {
@@ -908,18 +906,23 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
-  private errorToValue(err: any): any {
+  /**
+   * The value bound by catch (SPEC §7, D7): an object {kind: "runtime", line, message}.
+   * `line` is nil when the position is unknown.
+   */
+  private errorToValue(err: any): Map<string, any> {
+    let line: number | null = null;
+    let message: string;
     if (err instanceof RuntimeError) {
-      return {
-        message: err.message,
-        line: err.token?.line ?? null,
-        lexeme: err.token?.lexeme ?? null,
-        callStack: err.callStack ?? null,
-      };
+      message = err.message;
+      line = err.token?.line > 0 ? err.token.line : null;
+    } else if (err instanceof RangeError) {
+      message = "Stack overflow.";
+    } else if (err instanceof Error) {
+      message = err.message;
+    } else {
+      message = this.stringify(err);
     }
-    if (err instanceof Error) {
-      return { message: err.message, name: err.name };
-    }
-    return { message: this.stringify(err) };
+    return new Map<string, any>([["kind", "runtime"], ["line", line], ["message", message]]);
   }
 }
