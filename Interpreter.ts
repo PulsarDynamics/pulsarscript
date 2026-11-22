@@ -546,6 +546,10 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
 
   interpret(statements: Stmt[]): void {
     try {
+      // Hoist top-level functions so they can be called before their declaration (SPEC 4.6, D2).
+      for (const statement of statements) {
+        if (statement instanceof FunctionStmt) this.execute(statement);
+      }
       for (const statement of statements) {
         this.execute(statement);
       }

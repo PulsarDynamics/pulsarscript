@@ -32,6 +32,10 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   scopeStack: Map<string, number>[] = [new Map()];
   nextLocal = 0;
   functions: Map<string, FunctionEntry> = new Map();
+  /** Top-level function names, collected before code generation so calls can precede declarations (D2). */
+  hoisted: Set<string> = new Set();
+  /** CALL operands emitted before their callee was compiled; patched in compile(). */
+  callFixups: { operandPos: number; name: string }[] = [];
   currentLine = 1; // Track current source line for error mapping
 
   static compile(statements: Stmt[]): Chunk {
@@ -41,10 +45,19 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   compile(statements: Stmt[]): void {
+    // Hoist: every top-level function is callable from anywhere in the file (SPEC 4.6, D2).
+    for (const stmt of statements) {
+      if (stmt instanceof FunctionStmt) this.hoisted.add(stmt.name.lexeme);
+    }
     for (const stmt of statements) {
       stmt.accept(this);
     }
     this.emit(Opcode.HALT);
+    for (const fix of this.callFixups) {
+      const fn = this.functions.get(fix.name);
+      if (!fn) throw new Error(`internal: hoisted function '${fix.name}' was never compiled`);
+      this.chunk.code[fix.operandPos] = fn.address;
+    }
   }
 
   private emit(op: Opcode, operand?: number) {
@@ -368,6 +381,13 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const fn = this.functions.get(calleeName);
     if (fn) {
       this.emit(Opcode.CALL, fn.address);
+      this.emit(expr.arguments.length);
+      return;
+    }
+    if (this.hoisted.has(calleeName)) {
+      // Declared later in the file: emit the call now, patch the address once it is compiled.
+      this.emit(Opcode.CALL, 0);
+      this.callFixups.push({ operandPos: this.chunk.code.length - 1, name: calleeName });
       this.emit(expr.arguments.length);
       return;
     }

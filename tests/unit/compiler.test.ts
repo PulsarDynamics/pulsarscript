@@ -121,10 +121,22 @@ describe("compiler: structural invariants", () => {
 
   test.todo("SPEC: top-level var compiles to DEFINE_GLOBAL (D1)");
 
-  test("current behaviour: a call to a later-declared function compiles as HOST_CALL (D2)", () => {
-    const ops = decode(compile("function a() { return b(); }\nfunction b() { return 1; }\n")).map((i) => i.op);
-    expect(ops).toContain(Opcode.HOST_CALL);
+  test("a call to a later-declared function compiles as CALL to its address (D2)", () => {
+    const chunk = compile("function a() { return b(); }\nfunction b() { return 1; }\n");
+    const ins = decode(chunk);
+    expect(ins.map((i) => i.op)).not.toContain(Opcode.HOST_CALL);
+    const call = ins.find((i) => i.op === Opcode.CALL)!;
+    const b = chunk.functions!.find((f) => f.name === "b")!;
+    expect(call.args).toEqual([b.address, 0]);
   });
 
-  test.todo("SPEC: calls to functions declared later in the file compile as CALL (D2)");
+  test("a top-level call before the declaration compiles as CALL (D2)", () => {
+    const chunk = compile("print(f());\nfunction f() { return 1; }\n");
+    const call = decode(chunk).find((i) => i.op === Opcode.CALL)!;
+    expect(call.args[0]).toBe(chunk.functions![0].address);
+  });
+
+  test("unknown names still compile as host calls", () => {
+    expect(decode(compile("print(typeOf(1));\n")).map((i) => i.op)).toContain(Opcode.HOST_CALL);
+  });
 });

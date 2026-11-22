@@ -47,7 +47,17 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     private environment: Environment = new Environment();
     private currentFunction: FunctionType = FunctionType.NONE;
   
+    /** Top-level functions declared up front so they can be called before their declaration (D2). */
+    private hoisted = new Set<FunctionStmt>();
+
     analyze(statements: Stmt[]): void {
+      for (const statement of statements) {
+        if (statement instanceof FunctionStmt) {
+          this.declareVariable(statement.name);
+          this.environment.defineFunction(statement.name, statement);
+          this.hoisted.add(statement);
+        }
+      }
       for (const statement of statements) {
         this.analyzeStmt(statement);
       }
@@ -93,8 +103,10 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   visitFunctionStmt(stmt: FunctionStmt): void {
-      this.declareVariable(stmt.name);
-      this.environment.defineFunction(stmt.name, stmt);
+      if (!this.hoisted.has(stmt)) {
+        this.declareVariable(stmt.name);
+        this.environment.defineFunction(stmt.name, stmt);
+      }
       this.beginScope();
       for (const param of stmt.params) {
         this.declareVariable(param);
