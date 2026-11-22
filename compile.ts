@@ -30,7 +30,7 @@ for (const arg of args) {
 if (flags.help || positionalArgs.length === 0) {
   console.log(`PulsarScript Compiler
 
-Usage: bun run compile.ts [options] <input.poo> [output.json]
+Usage: bun run compile.ts [options] <input.puls> [output.json]
 
 Options:
   --check, -c          Check syntax and semantics only, don't emit bytecode
@@ -38,15 +38,20 @@ Options:
   --help, -h           Show this help message
 
 Examples:
-  bun run compile.ts script.poo                  # Compile and output
-  bun run compile.ts -c script.poo               # Check syntax only
-  bun run compile.ts -s script.poo out.json      # Include source map
+  bun run compile.ts script.puls                 # Compile and output
+  bun run compile.ts -c script.puls              # Check syntax and semantics only
+  bun run compile.ts -s script.puls out.json     # Include source map
 `);
   process.exit(flags.help ? 0 : 1);
 }
 
 const inputPath = positionalArgs[0];
-const outputPath = positionalArgs[1] || inputPath.replace(/\.poo$/, ".json").replace(/\.ps$/, ".json") || "out.bytecode.json";
+// PulsarScript source files end in .puls (SPEC §1). .poo was the old extension: still
+// compiled, with a warning, so existing files keep working while they are renamed.
+if (/\.poo$/.test(inputPath)) {
+  console.warn(`warning: ${inputPath}: the .poo extension is deprecated; rename the file to .puls`);
+}
+const outputPath = positionalArgs[1] || inputPath.replace(/\.(puls|poo)$/, ".json") || "out.bytecode.json";
 
 const source = await Bun.file(inputPath).text();
 const reporter = new ErrorReporter(source);

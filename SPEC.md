@@ -15,7 +15,8 @@
 
 ## 1. Source text
 
-- Source files use the extension `.poo`, are UTF-8, and are read as a whole.
+- Source files use the extension **`.puls`**, are UTF-8, and are read as a whole. (`.poo`, the old extension, is still compiled with a deprecation warning.)
+- A packaged PulsarOS app, which carries its compiled scripts, is a **`.pulsar`** file (§9).
 - **Whitespace:** space, tab, carriage return and newline separate tokens. Newlines also advance the line counter used in error messages.
 - **Comments:** `//` to the end of the line. There are no block comments.
 - **Statements end with `;`**, except block statements, `if`, `while`, `for`, `function` and `try` declarations.
@@ -304,12 +305,13 @@ Notes on the core functions:
   "permissions": { "scopes": ["fs.list"] },
   "script": {
     "bundle": "scripts/app.json",
-    "source": "scripts/app.poo",
+    "source": "scripts/app.puls",
     "handlers": [ { "name": "analyze", "mode": "rpc" }, { "name": "watcher", "mode": "service" } ]
   }
   ```
 
-  `appbundle` checks that the declared handlers and the registered ones match. The legacy `exports`/`services` forms are still read, with a warning.
+  `appbundle` checks that the declared handlers and the registered ones match, and that the bundle was compiled from the current source (§10). The legacy `exports`/`services` forms are still read, with a warning.
+- An app is distributed as a **`.pulsar` package**: a zip archive with `AppManifest.json` at its root and the app's files, including the compiled script bundle. `fruit build` and `appbundle package` write it; `.app`, the old package extension, is still read.
 - **Calling a handler** (fixed in D11): the app sends the IPC envelope `{v: 1, deviceId, processId, channel: "ipc.call", op: "script.call", payload: {appId, handler, args}, nonce, ts}` to the API's `/api/ipc`; services use `script.service.start`, `stop` and `status`. A non-list `args` is the handler's one argument; a list is the argument list. Arguments and results convert between JSON and PulsarScript values in both directions, objects and arrays included. An app can always call its own handlers and no other app's.
 - Handlers run with the app's identity and permissions. A script's `ipcSend(channel, op, payload)` reaches only the channels in the manifest's `permissions.scopes` (none without scopes), is rate-limited and raises a runtime error when refused or when the target fails. `ipcSetContext` cannot switch a server script to another device or process.
 
@@ -325,7 +327,7 @@ Produced by `compile.ts`, consumed by the Go VM (`vm/`, a Go module in this repo
 }
 ```
 
-**Header** (decision A5): `format` identifies the file; `version` is the format version (`Bytecode.ts` `BYTECODE_VERSION`, Go `BytecodeVersion`); `compiler` names the compiler that wrote it; `sourceHash` is the SHA-256 of the UTF-8 source, so tools can tell a bundle that is stale against its `.poo` source. The VM loads version 1 and version 0 (a file with no header, written before SPEC v0.4, otherwise identical) and **rejects any other version or format** with an error asking to recompile or upgrade. Any change the VM must know about (opcodes, operands, fields) bumps the version.
+**Header** (decision A5): `format` identifies the file; `version` is the format version (`Bytecode.ts` `BYTECODE_VERSION`, Go `BytecodeVersion`); `compiler` names the compiler that wrote it; `sourceHash` is the SHA-256 of the UTF-8 source, so tools can tell a bundle that is stale against its `.puls` source. The VM loads version 1 and version 0 (a file with no header, written before SPEC v0.4, otherwise identical) and **rejects any other version or format** with an error asking to recompile or upgrade. Any change the VM must know about (opcodes, operands, fields) bumps the version.
 
 - `code` is a flat array of opcode numbers, each followed by its operands. The opcode numbers are fixed by `Bytecode.ts`, mirrored in `vm/vm.go` and checked against each other by a Go test and a snapshot test; changing a number is a breaking format change and needs a version bump.
 - Operand counts: 1 for `CONST`, `DEFINE_GLOBAL`, `GET_GLOBAL`, `SET_GLOBAL`, `GET_LOCAL`, `SET_LOCAL`, `JUMP`, `JUMP_IF_FALSE`, `ENTER_BLOCK`, `EXIT_BLOCK`, `TRY_PUSH`, `NEW_ARRAY`, `NEW_OBJECT`; **2** for `CALL` (address, argument count) and `HOST_CALL` (name constant, argument count); 0 for the rest.
@@ -343,7 +345,7 @@ Produced by `compile.ts`, consumed by the Go VM (`vm/`, a Go module in this repo
 ## 11. Conformance
 
 - `bun run conformance` runs every case on `interp` and on the `vm`. It builds `vm/cmd/vmrun` from the checkout when Go is installed; `PULSARSCRIPT_VMRUN` or `--vmrun` point at another binary, and `--require-vm` fails the run when no VM is available. Cases are compiled with a line map (`-s`).
-- A case is `<name>.poo` plus `<name>.expected`: one line per printed value, then an optional `!error` or `!error: <kind>` line (`parse`, `semantic`, `runtime`, `compile`).
+- A case is `<name>.puls` plus `<name>.expected`: one line per printed value, then an optional `!error` or `!error: <kind>` line (`parse`, `semantic`, `runtime`, `compile`).
 - Known defects are marked in the case with `// @xfail <runtimes> <defect> <note>`. A marked case that starts passing fails the run until the marker is removed, so fixes are never silent.
 
 ## 12. Defect register
