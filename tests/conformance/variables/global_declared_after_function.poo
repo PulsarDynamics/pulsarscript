@@ -1,0 +1,4 @@
+// @xfail all D1 interp: analyzer rejects y before declaration; vm: globals bug
+function f() { return y; }
+var y = 5;
+print(f());

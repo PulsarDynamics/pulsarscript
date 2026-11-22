@@ -1,0 +1,6 @@
+// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
+// @xfail vm D15 arrayPush/arrayPop do not mutate the array value in place (value semantics); unspecified
+var a = [1];
+arrayPush(a, 2, 3);
+print(arrayLen(a));
+print(arrayPop(a));

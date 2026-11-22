@@ -1,0 +1,4 @@
+if (0) { print("0 truthy"); }
+if ("") { print("empty truthy"); }
+if (nil) { print("nil truthy"); } else { print("nil falsy"); }
+if (false) { print("x"); } else { print("false falsy"); }

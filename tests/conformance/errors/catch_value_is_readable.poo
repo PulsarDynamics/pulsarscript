@@ -1,0 +1,2 @@
+// @xfail all D7 error value shape not specified yet (interp: semantic error; vm: string)
+try { notAFunction(); } catch (e) { print(typeOf(e)); }

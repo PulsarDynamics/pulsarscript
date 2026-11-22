@@ -1,0 +1,6 @@
+var ok = true;
+for (var i = 0; i < 50; i = i + 1) {
+  var r = randomInt(1, 6);
+  if (r < 1 || r > 6) { ok = false; }
+}
+print(ok);

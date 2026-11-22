@@ -1,0 +1,4 @@
+// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
+var a = [10, 20, 30, 40];
+print(arrayIndexOf(a, 30));
+print(arrayLen(arraySlice(a, 1, 3)));

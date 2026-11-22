@@ -1,0 +1,3 @@
+// @xfail all D13 parser swallows the error and continues
+1 = 2;
+print("after");

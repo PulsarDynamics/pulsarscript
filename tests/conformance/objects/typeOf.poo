@@ -1,0 +1,2 @@
+// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
+print(typeOf({}));

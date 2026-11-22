@@ -1,0 +1,3 @@
+// a line comment
+print(1); // trailing
+// print(2);

@@ -1,0 +1,4 @@
+var a = "global";
+function f(a) { a = "changed"; return a; }
+print(f("x"));
+print(a);

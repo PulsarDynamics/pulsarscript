@@ -1,0 +1,5 @@
+// @xfail interp D4 interpreter lacks array/object literals and the array*/obj* host calls
+var o = {a: 1, b: 2};
+print(objHas(o, "a"));
+print(objHas(o, "z"));
+print(arrayLen(objKeys(o)));
