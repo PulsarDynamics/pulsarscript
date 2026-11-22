@@ -207,7 +207,7 @@ A `vm` step is one bytecode instruction; an `interp` step is one statement, loop
 
 ## 8. Built-in functions and host calls
 
-Every function a script can call without declaring it is listed in **`hostapi.json`**, the registry shared by the compiler, the analyzer, the interpreter and the Go VM (decision A3; fixed D5, where each runtime kept its own list). An entry gives the name, the parameters with their types, the return type and, for host calls, the capability it will require (decision A4, not enforced yet).
+Every function a script can call without declaring it is listed in **`vm/hostapi.json`**, the one registry read by the compiler, the analyzer, the interpreter and the Go VM (decision A3; fixed D5, where each runtime kept its own list). An entry gives the name, the parameters with their types, the return type and, for host calls, the capability it will require (decision A4, not enforced yet).
 
 - **Core** functions are pure and implemented inside every runtime, so they behave the same on every host.
 - **Host** functions are supplied by the embedding host (the PulsarOS API's script manager, `host.ts` bridges, or `vmrun -sandbox-root` for `fsRead`/`fsWrite`/`fsList`/`fsExists`). A host that does not provide one raises a runtime error when it is called; `vmrun` alone returns `nil`.
@@ -218,7 +218,7 @@ Host calls are encapsulated in three layers:
 2. **Load time:** the VM verifies a module before running it: every opcode is known, and every `HOST_CALL` names a registry entry with a valid argument count. Hand-written or stale bytecode that calls anything else is rejected with `invalid module: unknown host call …`.
 3. **Call time:** argument types are checked against the registry. Core calls run inside the VM; only host entries reach the host's `HostCall` callback.
 
-To add a built-in: add the entry to `hostapi.json`, implement it in `Interpreter.ts` (core or host) and, for core, in `pulsarscriptvm/builtins.go`, copy `hostapi.json` into pulsaros-api, add conformance cases, and run `bun run gen:hostapi` to refresh the table below. Tests on both sides fail if an entry has no implementation or an implementation has no entry.
+To add a built-in: add the entry to `hostapi.json`, implement it in `Interpreter.ts` (core or host) and, for core, in `vm/builtins.go`, add conformance cases, and run `bun run gen:hostapi` to refresh the table below. Tests on both sides fail if an entry has no implementation or an implementation has no entry.
 
 Notes on the core functions:
 - String indices and lengths (`len`, `indexOf`, `substr`) count Unicode code points.

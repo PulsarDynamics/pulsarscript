@@ -1,5 +1,5 @@
 {
-  "$comment": "PulsarScript built-in and host-call registry (SPEC §8). Single source of truth for the compiler, the analyzer, the interpreter and the Go VM. pulsaros-api embeds an exact copy at internal/pulsarscriptvm/hostapi.json; CI fails if they differ. provider: core = pure, implemented by every runtime; host = supplied by the embedding host. Parameter types: any, number, string, boolean, array, object, or a union such as string|number. A parameter may be optional (only trailing) or variadic (only last). capability names the permission a host call will require (decision A4); it is not enforced yet.",
+  "$comment": "PulsarScript built-in and host-call registry (SPEC §8). Single source of truth: the Go VM embeds this file and the TypeScript compiler, analyzer and interpreter import it. provider: core = pure, implemented by every runtime; host = supplied by the embedding host. Parameter types: any, number, string, boolean, array, object, or a union such as string|number. A parameter may be optional (only trailing) or variadic (only last). capability names the permission a host call will require (decision A4); it is not enforced yet.",
   "version": 1,
   "functions": [
     { "name": "typeOf", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "string", "doc": "Type name: nil, number, string, boolean, array or object." },
