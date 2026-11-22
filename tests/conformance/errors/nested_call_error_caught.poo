@@ -1,0 +1,9 @@
+// An error in a nested call unwinds to the caller's handler (D19).
+function boom() { var z = 1 / 0; return z; }
+function outer() {
+  var a = 7;
+  try { boom(); } catch (e) { print("caught"); }
+  return a;
+}
+print(outer());
+print("done");

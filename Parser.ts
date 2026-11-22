@@ -50,10 +50,19 @@ export class Parser {
         return statements;
     }
 
+    // Statements and primary expressions record their source line for the compiler's line
+    // map, so runtime errors point at the right line on the VM (D18).
+    private withLine<T>(line: number, node: T): T {
+        const n = node as { line?: number };
+        if (n.line === undefined) n.line = line;
+        return node;
+    }
+
     private declaration(): Stmt {
+        const line = this.peek().line;
         try {
-            if (this.match(TokenType.VAR)) return this.varDeclaration();
-            if (this.match(TokenType.FUNCTION)) return this.function("function");
+            if (this.match(TokenType.VAR)) return this.withLine(line, this.varDeclaration());
+            if (this.match(TokenType.FUNCTION)) return this.withLine(line, this.function("function"));
             return this.statement();
         } catch (error) {
             this.synchronize();
@@ -94,6 +103,11 @@ export class Parser {
     }
 
     private statement(): Stmt {
+        const line = this.peek().line;
+        return this.withLine(line, this.statementWithoutLine());
+    }
+
+    private statementWithoutLine(): Stmt {
         if (this.match(TokenType.PRINT)) return this.printStatement();
         if (this.match(TokenType.IF)) return this.ifStatement();
         if (this.match(TokenType.WHILE)) return this.whileStatement();
@@ -352,6 +366,11 @@ export class Parser {
     }
 
     private primary(): Expr {
+        const line = this.peek().line;
+        return this.withLine(line, this.primaryWithoutLine());
+    }
+
+    private primaryWithoutLine(): Expr {
         if (this.match(TokenType.FALSE)) return new Literal(false);
         if (this.match(TokenType.TRUE)) return new Literal(true);
         if (this.match(TokenType.NIL)) return new Literal(null);

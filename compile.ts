@@ -31,7 +31,7 @@ if (flags.help || positionalArgs.length === 0) {
 Usage: bun run compile.ts [options] <input.poo> [output.json]
 
 Options:
-  --check, -c          Validate only, don't emit bytecode
+  --check, -c          Check syntax and semantics only, don't emit bytecode
   --emit-sourcemap, -s Include line mapping in output
   --help, -h           Show this help message
 
@@ -54,10 +54,12 @@ try {
   const tokens = lexer.scanTokens();
   const parser = new Parser(tokens);
   const stmts = parser.parse();
+  // Same front end as the interpreter: scoping, unknown names and call arity are checked
+  // against the source before any bytecode exists (SPEC 7).
+  new SemanticAnalyzer().analyze(stmts);
 
   if (flags.check) {
-    // Validation-only mode: run semantic analyzer if available
-    console.log(`✓ Syntax valid: ${inputPath}`);
+    console.log(`✓ Valid: ${inputPath}`);
     process.exit(0);
   }
 

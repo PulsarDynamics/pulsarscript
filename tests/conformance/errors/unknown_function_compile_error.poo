@@ -1,0 +1,3 @@
+// Calls resolve against hostapi.json at compile time (SPEC 4.6, D3).
+print("never printed");
+notAFunction(1);

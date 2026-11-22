@@ -12,7 +12,7 @@ bun run repl
 | `.exit` | Exit REPL |
 | `.clear` | Clear screen |
 | `.reset` | Reset interpreter |
-| `.strict [on\|off]` | Toggle strict mode |
+| `.strict [on\|off]` | Toggle checked built-in arguments (on by default) |
 | `.history` | Show history |
 | `.multiline` | Multi-line input mode |
 
@@ -99,9 +99,10 @@ concat("Hello", " ", "World")   // "Hello World"
 
 ### Random
 ```javascript
-clock()            // Current timestamp
+clock()            // Milliseconds since the Unix epoch
 random()           // Random [0, 1)
-randomInt(1, 6)    // Random int [1, 6]
+randomInt(1, 6)    // Random int [1, 6], both bounds included
+randomSeed(42)     // Repeatable random/randomInt on this runtime
 ```
 
 ### Safe Parsing
@@ -110,48 +111,27 @@ parseInt("42", 10)      // 42
 parseInt("1A", 16)      // 26
 parseFloat("3.14")      // 3.14
 toNumberOr("bad", 0)    // 0
+parseInt("19", 8)       // nil (whole string must be digits of the base)
 isInteger(10)           // true
-isFinite(1/0)           // false (in non-strict)
+isFinite("1")           // false (not a number)
 ```
 
-### IPC Helpers (requires host IPC bridge)
+### IPC (requires a host IPC bridge)
 ```javascript
-ipcNonce()                                 // Generates a random nonce
-ipcSetContext("device-1", "process-1")     // Sets default device/process for future IPC calls
-var env = ipcEnvelope("net.scan", "scan", { worldZone: "airport" })
-var res = ipcSend("net.scan", "scan", { worldZone: "airport" }) // Sends via host bridge, returns result or throws on error
-ipcSendRaw(env)                            // Send a pre-built envelope (fills defaults if missing)
-ipcSendAsync("net.scan", "scan", { worldZone: "airport" }, 
-  function (res) { print(res); }, 
-  function (err) { print(err.message); })  // Async send with callbacks (uses host sendAsync if available)
+ipcSetContext("device-1", "process-1")                   // device/process for later sends
+var res = ipcSend("net.scan", "scan", {worldZone: "airport"})  // result, or a runtime error
 ```
 
-### Error Handling Helper
+### Errors
 ```javascript
-tryCatch(
-  function () { return riskyCall(); },
-  function (err) { print(concat("Error: ", err.message)); return nil; }
-);
-
-// Structured try/catch syntax
 try {
-  print("do risky stuff");
+  var x = 1 / 0;
 } catch (e) {
-  print(concat("Caught: ", e.message));
+  print(concat("Caught at line ", objGet(e, "line")));   // e is {kind, line, message}
 }
 ```
 
-### Modules (host-provided or dynamic)
-```javascript
-// Host preloads modules via interpreter options; import them at runtime:
-var utils = importModule("utils");
-print(utils.version);
-
-// Dynamically register a module
-registerModule("math2", { double: function (x) { return x + x; } });
-var m2 = importModule("math2");
-print(m2.double(10)); // 20
-```
+The full list of built-ins and host calls, with parameter types, is generated into SPEC.md §8 from `hostapi.json`. Calling anything else is a compile-time error.
 
 ### Sandboxed I/O (host-provided IO bridge)
 ```javascript
@@ -163,18 +143,17 @@ print(kvGet("key"));                             // 123
 kvDelete("key");
 ```
 
-## Strict Mode
+## Types
 
 ```javascript
-// Enable in REPL
-.strict on
-
-// In strict mode:
-1 + "2"                    // ERROR!
-concat(1, "2")             // "12" (OK)
-toUpper(123)               // ERROR!
+1 + "2"                    // "12" (+ concatenates when either side is a string)
+true + 1                   // ERROR: arithmetic needs numbers
+toUpper(123)               // ERROR: wrong argument type
 toUpper(string(123))       // "123" (OK)
+[1, 2] == [1, 2]           // true (arrays and objects compare by contents)
 ```
+
+`.strict off` in the REPL makes built-ins coerce their arguments instead of failing. It exists for old embedders and is not part of the language.
 
 ## Examples
 
@@ -251,5 +230,5 @@ Call stack:
 - Use `.multiline` for complex functions
 - Use `.reset` if state gets confusing
 - Use `.history` to review commands
-- In strict mode, use `concat()` instead of `+` for mixed types
+- `arrayPush`, `objSet` and friends return a new value: write `a = arrayPush(a, x);`
 - Use safe parsing (`parseInt`, `parseFloat`) for user input

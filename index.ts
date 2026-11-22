@@ -5,16 +5,17 @@ import { Interpreter, RuntimeError } from "./Interpreter";
 import { ErrorReporter, formatCallStack } from "./ErrorReporter";
 
 const source = `
-print("=== Strict Mode Tests ===");
-// Mixed type plus should fail in strict mode
-print("About to evaluate number + string (should error in strict mode)");
-// print(1 + "2"); // Uncomment to see strict-mode error
-// Use concat() instead for explicit string building under strict mode
+print("=== Type Tests ===");
+// + concatenates when either side is a string
+print(1 + "2" + " apples");
+// print(true + 1); // Uncomment to see the runtime error for arithmetic on non-numbers
 print(concat(1, "2", 3, " apples"));
+print(arrayPush([1, 2], 3));
+print({name: "pulsar", version: 6});
 // toUpper strict mode example (commented)
 print("Calling toUpper with a string:");
 print(toUpper("hello"));
-// print(toUpper(123)); // Uncomment to see strict-mode error
+// print(toUpper(123)); // Uncomment to see the argument type error
 // parseInt strict success & failure
 print(parseInt("42", 10));
 print(parseInt("42px", 10)); // should be nil

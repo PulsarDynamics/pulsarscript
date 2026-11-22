@@ -24,26 +24,10 @@ import type { ExprVisitor } from "./interfaces/ExprVisitor";
 import type { Stmt } from "./interfaces/Stmt";
 import type { StmtVisitor } from "./interfaces/StmtVisitor";
 import type { Token } from "./interfaces/Token";
+import { arityError, lookupHostFunction } from "./HostApi";
 
 export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
-    // List of allowed built-in global identifiers (native functions provided by Interpreter).
-    private static builtinNames = new Set<string>([
-      "typeOf","number","string","clock","random","randomInt",
-      "abs","floor","ceil","round","sqrt","pow","min","max","clamp",
-      "len","toUpper","toLower","trim","indexOf","substr",
-      "parseInt","parseFloat","toNumberOr","isInteger","isFinite","concat"
-    ]);
-
-    private static builtinArity = new Map<string, number>([
-      ["typeOf", 1],["number",1],["string",1],["clock",0],["random",0],["randomInt",2],
-      ["abs",1],["floor",1],["ceil",1],["round",1],["sqrt",1],["pow",2],["min",2],["max",2],["clamp",3],
-      ["len",1],["toUpper",1],["toLower",1],["trim",1],["indexOf",2],["substr",3],
-      ["parseInt",2],["parseFloat",1],["toNumberOr",2],["isInteger",1],["isFinite",1],["concat",-1]
-    ]);
-
-    private static isBuiltin(name: string): boolean {
-      return SemanticAnalyzer.builtinNames.has(name);
-    }
+    // Built-ins and host calls come from hostapi.json (SPEC §8); they are callable, not values.
     private environment: Environment = new Environment();
     private currentFunction: FunctionType = FunctionType.NONE;
   
@@ -98,7 +82,7 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   
   visitVariableExpr(expr: Variable): void {
     // Allow reference to built-in globals (standard library) by whitelisting names.
-    if (!this.environment.isDefined(expr.name) && !SemanticAnalyzer.isBuiltin(expr.name.lexeme) && !this.isLaterGlobal(expr.name)) {
+    if (!this.environment.isDefined(expr.name) && !this.isLaterGlobal(expr.name)) {
         throw new SemanticError(expr.name, "Variable is not defined.");
     }
   }
@@ -179,30 +163,33 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   visitCallExpr(expr: Call): void {
-      this.analyzeExpr(expr.callee);
       for (const arg of expr.arguments) {
         this.analyzeExpr(arg);
       }
-      // Check if the callee is actually a function
-      if (expr.callee instanceof Variable) {
-        const funcDecl = this.environment.getFunction(expr.callee.name);
-        if (funcDecl !== null) {
-          // User-defined function
-          if (expr.arguments.length !== funcDecl.params.length) {
-            throw new SemanticError(expr.paren, `Expected ${funcDecl.params.length} arguments but got ${expr.arguments.length}.`);
-          }
-        } else if (SemanticAnalyzer.isBuiltin(expr.callee.name.lexeme)) {
-          const expected = SemanticAnalyzer.builtinArity.get(expr.callee.name.lexeme)!;
-          if (expected >= 0 && expr.arguments.length !== expected) {
-            throw new SemanticError(expr.paren, `Expected ${expected} arguments but got ${expr.arguments.length}.`);
-          }
-          // expected < 0 => variadic; allow any arity
-        } else {
-          throw new SemanticError(expr.paren, "Can only call functions.");
-        }
+      if (!(expr.callee instanceof Variable)) {
+        throw new SemanticError(expr.paren, "Can only call functions.");
       }
+      const name = expr.callee.name;
+      const funcDecl = this.environment.getFunction(name);
+      if (funcDecl !== null) {
+        // User-defined function (shadows a built-in of the same name)
+        if (expr.arguments.length !== funcDecl.params.length) {
+          throw new SemanticError(expr.paren, `Expected ${funcDecl.params.length} arguments but got ${expr.arguments.length}.`);
+        }
+        return;
+      }
+      if (this.environment.isDefined(name)) {
+        throw new SemanticError(expr.paren, "Can only call functions.");
+      }
+      // Otherwise it must be a registered built-in or host call; unknown names fail here (D3).
+      const host = lookupHostFunction(name.lexeme);
+      if (!host) {
+        throw new SemanticError(name, `Unknown function '${name.lexeme}'.`);
+      }
+      const arity = arityError(host, expr.arguments.length);
+      if (arity) throw new SemanticError(expr.paren, arity);
     }
-  
+
     visitGroupingExpr(expr: Grouping): void {
       this.analyzeExpr(expr.expression);
     }

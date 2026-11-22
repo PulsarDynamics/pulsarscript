@@ -1,0 +1,2 @@
+function len(x) { return 42; }
+print(len("abc"));

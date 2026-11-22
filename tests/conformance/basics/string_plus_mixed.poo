@@ -1,0 +1,7 @@
+// + concatenates when either side is a string, using printed forms (SPEC 4.2, D6).
+print("n=" + 1.5);
+print(true + "!");
+print("v: " + nil);
+print("a" + [1, "b"]);
+print(1 + 2 + "x");
+print("x" + 1 + 2);

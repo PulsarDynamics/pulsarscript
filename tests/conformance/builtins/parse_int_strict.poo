@@ -1,0 +1,6 @@
+print(parseInt("ff", 16));
+print(parseInt("19", 8));
+print(parseInt("12px", 10));
+print(parseInt(" -42 ", 10));
+print(parseInt(7.5, 10));
+print(parseInt("10", 1));

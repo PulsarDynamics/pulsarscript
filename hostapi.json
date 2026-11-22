@@ -1,0 +1,67 @@
+{
+  "$comment": "PulsarScript built-in and host-call registry (SPEC §8). Single source of truth for the compiler, the analyzer, the interpreter and the Go VM. pulsaros-api embeds an exact copy at internal/pulsarscriptvm/hostapi.json; CI fails if they differ. provider: core = pure, implemented by every runtime; host = supplied by the embedding host. Parameter types: any, number, string, boolean, array, object, or a union such as string|number. A parameter may be optional (only trailing) or variadic (only last). capability names the permission a host call will require (decision A4); it is not enforced yet.",
+  "version": 1,
+  "functions": [
+    { "name": "typeOf", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "string", "doc": "Type name: nil, number, string, boolean, array or object." },
+    { "name": "string", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "string", "doc": "Printed form of a value (§3.2)." },
+    { "name": "number", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "number|nil", "doc": "Numbers as-is; true/false to 1/0; a decimal-literal string to its number; anything else to nil." },
+    { "name": "concat", "provider": "core", "params": [{ "name": "parts", "type": "any", "variadic": true }], "returns": "string", "doc": "Joins the printed forms of all arguments." },
+    { "name": "len", "provider": "core", "params": [{ "name": "value", "type": "string|array" }], "returns": "number", "doc": "Length of a string in Unicode code points, or of an array." },
+
+    { "name": "abs", "provider": "core", "params": [{ "name": "n", "type": "number" }], "returns": "number", "doc": "Absolute value." },
+    { "name": "floor", "provider": "core", "params": [{ "name": "n", "type": "number" }], "returns": "number", "doc": "Largest integer not greater than n." },
+    { "name": "ceil", "provider": "core", "params": [{ "name": "n", "type": "number" }], "returns": "number", "doc": "Smallest integer not less than n." },
+    { "name": "round", "provider": "core", "params": [{ "name": "n", "type": "number" }], "returns": "number", "doc": "Nearest integer; halves round up (toward +Infinity), as in JavaScript." },
+    { "name": "sqrt", "provider": "core", "params": [{ "name": "n", "type": "number" }], "returns": "number", "doc": "Square root; NaN for negative n." },
+    { "name": "pow", "provider": "core", "params": [{ "name": "base", "type": "number" }, { "name": "exponent", "type": "number" }], "returns": "number", "doc": "base raised to exponent." },
+    { "name": "min", "provider": "core", "params": [{ "name": "a", "type": "number" }, { "name": "b", "type": "number" }], "returns": "number", "doc": "Smaller of a and b." },
+    { "name": "max", "provider": "core", "params": [{ "name": "a", "type": "number" }, { "name": "b", "type": "number" }], "returns": "number", "doc": "Larger of a and b." },
+    { "name": "clamp", "provider": "core", "params": [{ "name": "n", "type": "number" }, { "name": "lo", "type": "number" }, { "name": "hi", "type": "number" }], "returns": "number", "doc": "min(max(n, lo), hi)." },
+    { "name": "isInteger", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "boolean", "doc": "True for a number with no fractional part." },
+    { "name": "isFinite", "provider": "core", "params": [{ "name": "value", "type": "any" }], "returns": "boolean", "doc": "True for a number that is not NaN or ±Infinity." },
+
+    { "name": "toUpper", "provider": "core", "params": [{ "name": "s", "type": "string" }], "returns": "string", "doc": "Upper case (Unicode simple case mapping)." },
+    { "name": "toLower", "provider": "core", "params": [{ "name": "s", "type": "string" }], "returns": "string", "doc": "Lower case (Unicode simple case mapping)." },
+    { "name": "trim", "provider": "core", "params": [{ "name": "s", "type": "string" }], "returns": "string", "doc": "Removes leading and trailing whitespace." },
+    { "name": "indexOf", "provider": "core", "params": [{ "name": "s", "type": "string" }, { "name": "sub", "type": "string" }], "returns": "number", "doc": "Code-point index of the first occurrence of sub, or -1." },
+    { "name": "substr", "provider": "core", "params": [{ "name": "s", "type": "string" }, { "name": "start", "type": "number" }, { "name": "length", "type": "number" }], "returns": "string", "doc": "Up to length code points from start (both truncated toward zero; negative values are errors)." },
+
+    { "name": "parseInt", "provider": "core", "params": [{ "name": "s", "type": "string|number" }, { "name": "base", "type": "number" }], "returns": "number|nil", "doc": "Whole string as an integer in base 2-36 (optional sign, surrounding whitespace); nil if any character is not a digit of the base." },
+    { "name": "parseFloat", "provider": "core", "params": [{ "name": "s", "type": "string|number" }], "returns": "number|nil", "doc": "Whole string as a decimal number without exponent; nil otherwise." },
+    { "name": "toNumberOr", "provider": "core", "params": [{ "name": "value", "type": "any" }, { "name": "fallback", "type": "any" }], "returns": "any", "doc": "number(value), or fallback when that is nil." },
+
+    { "name": "clock", "provider": "core", "params": [], "returns": "number", "doc": "Milliseconds since the Unix epoch." },
+    { "name": "random", "provider": "core", "params": [], "returns": "number", "doc": "Pseudo-random number in [0, 1)." },
+    { "name": "randomInt", "provider": "core", "params": [{ "name": "a", "type": "number" }, { "name": "b", "type": "number" }], "returns": "number", "doc": "Pseudo-random integer in [min(a, b), max(a, b)], bounds truncated toward zero." },
+    { "name": "randomSeed", "provider": "core", "params": [{ "name": "seed", "type": "number" }], "returns": "nil", "doc": "Seeds random and randomInt so a run is repeatable on the same runtime." },
+
+    { "name": "arrayLen", "provider": "core", "params": [{ "name": "a", "type": "array" }], "returns": "number", "doc": "Number of elements." },
+    { "name": "arrayPush", "provider": "core", "params": [{ "name": "a", "type": "array" }, { "name": "values", "type": "any", "variadic": true, "min": 1 }], "returns": "array", "doc": "New array with values appended." },
+    { "name": "arrayPop", "provider": "core", "params": [{ "name": "a", "type": "array" }], "returns": "any", "doc": "Last element, or nil when empty. Does not change a." },
+    { "name": "arraySlice", "provider": "core", "params": [{ "name": "a", "type": "array" }, { "name": "start", "type": "number" }, { "name": "end", "type": "number" }], "returns": "array", "doc": "Elements from start up to end (exclusive); indices truncated and clamped; start > end gives []." },
+    { "name": "arrayConcat", "provider": "core", "params": [{ "name": "a", "type": "array" }, { "name": "rest", "type": "array", "variadic": true, "min": 1 }], "returns": "array", "doc": "New array joining all arguments." },
+    { "name": "arrayIndexOf", "provider": "core", "params": [{ "name": "a", "type": "array" }, { "name": "value", "type": "any" }], "returns": "number", "doc": "Index of the first element == value, or -1." },
+
+    { "name": "objKeys", "provider": "core", "params": [{ "name": "o", "type": "object" }], "returns": "array", "doc": "Keys in sorted order." },
+    { "name": "objValues", "provider": "core", "params": [{ "name": "o", "type": "object" }], "returns": "array", "doc": "Values in sorted key order." },
+    { "name": "objHas", "provider": "core", "params": [{ "name": "o", "type": "object" }, { "name": "key", "type": "any" }], "returns": "boolean", "doc": "Whether string(key) is a key of o." },
+    { "name": "objGet", "provider": "core", "params": [{ "name": "o", "type": "object" }, { "name": "key", "type": "any" }], "returns": "any", "doc": "Value at string(key), or nil." },
+    { "name": "objSet", "provider": "core", "params": [{ "name": "o", "type": "object" }, { "name": "key", "type": "any" }, { "name": "value", "type": "any" }], "returns": "object", "doc": "New object with string(key) set to value." },
+
+    { "name": "registerHandler", "provider": "core", "params": [{ "name": "name", "type": "string" }, { "name": "functionName", "type": "string" }], "returns": "nil", "doc": "Exposes a top-level function to the host under name." },
+
+    { "name": "kvGet", "provider": "host", "capability": "kv", "params": [{ "name": "key", "type": "string" }], "returns": "any", "doc": "Value stored under key, or nil." },
+    { "name": "kvSet", "provider": "host", "capability": "kv", "params": [{ "name": "key", "type": "string" }, { "name": "value", "type": "any" }], "returns": "any", "doc": "Stores value under key." },
+    { "name": "kvDelete", "provider": "host", "capability": "kv", "params": [{ "name": "key", "type": "string" }], "returns": "any", "doc": "Removes key." },
+    { "name": "fsRead", "provider": "host", "capability": "fs.read", "params": [{ "name": "path", "type": "string" }], "returns": "string|nil", "doc": "File contents, or nil." },
+    { "name": "fsList", "provider": "host", "capability": "fs.read", "params": [{ "name": "path", "type": "string" }], "returns": "array", "doc": "Directory entries." },
+    { "name": "fsStat", "provider": "host", "capability": "fs.read", "params": [{ "name": "path", "type": "string" }], "returns": "object|nil", "doc": "Entry metadata, or nil." },
+    { "name": "fsExists", "provider": "host", "capability": "fs.read", "params": [{ "name": "path", "type": "string" }], "returns": "boolean", "doc": "Whether path exists." },
+    { "name": "fsWrite", "provider": "host", "capability": "fs.write", "params": [{ "name": "path", "type": "string" }, { "name": "content", "type": "any" }], "returns": "boolean", "doc": "Writes string(content) to path." },
+    { "name": "fsDelete", "provider": "host", "capability": "fs.write", "params": [{ "name": "path", "type": "string" }], "returns": "boolean", "doc": "Deletes path." },
+    { "name": "emitEvent", "provider": "host", "capability": "events", "params": [{ "name": "payload", "type": "any", "optional": true }], "returns": "any", "doc": "Sends an event to the host." },
+    { "name": "pollEvent", "provider": "host", "capability": "events", "params": [], "returns": "any", "doc": "Next queued event, or nil." },
+    { "name": "ipcSetContext", "provider": "host", "capability": "ipc", "params": [{ "name": "deviceId", "type": "string" }, { "name": "processId", "type": "string" }], "returns": "nil", "doc": "Sets the device and process used by ipcSend." },
+    { "name": "ipcSend", "provider": "host", "capability": "ipc", "params": [{ "name": "channel", "type": "string" }, { "name": "op", "type": "string" }, { "name": "payload", "type": "any" }], "returns": "any", "doc": "Sends a PulsarOS IPC message; subject to the app's allowed channels and operations." }
+  ]
+}

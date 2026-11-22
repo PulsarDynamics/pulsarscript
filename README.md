@@ -1,10 +1,10 @@
 # PulsarScript
 
-A dynamically-typed scripting language with optional strict typing, built-in functions, and comprehensive error reporting.
+A dynamically-typed scripting language with checked arithmetic, built-in functions, and comprehensive error reporting. The language is defined by [SPEC.md](SPEC.md).
 
 ## Features
 
-- ✨ Dynamic and strict typing modes
+- ✨ Dynamic typing with checked arithmetic; arrays and objects as values
 - 🔧 Rich standard library (math, strings, type checking)
 - 🎯 Detailed error messages with source context and call stacks
 - 🔄 For/while loops, functions, and control flow
@@ -59,14 +59,17 @@ go run ./cmd/vmrun -inspect script.json
 - ✅ Try/catch exception handling
 - ✅ Arrays: `[1, 2, 3]`, array host calls
 - ✅ Objects: `{name: "value"}`, object host calls  
-- ✅ 40+ host calls (math, filesystem, KV, IPC, events)
+- ✅ 53 built-ins and host calls, listed in [`hostapi.json`](hostapi.json) (SPEC §8); unknown names fail at compile time
 - ✅ Source mapping for error line numbers
-- ✅ Configurable stack/memory limits
+- ✅ Default step, time and call-depth budgets (SPEC §7)
 
-Host bridges:
-- `ipc`: `{ send(envelope), sendAsync?(envelope), defaultDeviceId?, defaultProcessId? }`
-- `io`: `{ readFile, writeFile, listDir, kvGet?, kvSet?, kvDelete? }`
-- Modules: pass `modules` map or `moduleLoader` in `Interpreter` options.
+Interpreter options (`new Interpreter({...})`, `runSource(src, {...})`):
+- `ipc`: `{ send(envelope), defaultDeviceId?, defaultProcessId? }`
+- `io`: `{ readFile, writeFile, listDir, kvGet?, kvSet?, kvDelete?, stat?, exists?, deleteFile? }`
+- `events`: `{ emit(payload), poll() }`
+- `limits`: `{ maxSteps, timeoutMs, maxCallDepth }` (defaults 10,000,000 / 10,000 ms / 256; `0` or `Infinity` lifts one)
+
+Handlers registered with `registerHandler(name, fn)` can be called from TypeScript with `interpreter.callHandler(name, args)`.
 
 ## Usage
 
@@ -130,14 +133,13 @@ for (var j = 0; j < 5; j = j + 1) {
 }
 ```
 
-### Strict Mode
+### Types and `+`
 
 ```javascript
-// Enable strict typing
-var result = 1 + "2"; // Error in strict mode!
-
-// Use concat for explicit string concatenation
-var result = concat(1, "2", " items"); // "12 items"
+var label = "items: " + 3;       // "items: 3" (+ concatenates when either side is a string)
+var bad = true + 1;              // runtime error: arithmetic needs numbers
+var list = arrayPush([1], 2);    // [1, 2] (arrays and objects are values; assign the result)
+try { var x = 1 / 0; } catch (e) { print(objGet(e, "line")); }   // e is {kind, line, message}
 ```
 
 ### Built-in Functions

@@ -150,7 +150,7 @@ async function runInterp(c: Case): Promise<string[]> {
 async function runVm(c: Case): Promise<string[]> {
   mkdirSync(OUT, { recursive: true });
   const bc = join(OUT, c.name.replace(/[\/\\]/g, "__") + ".json");
-  const comp = await run(["bun", join(REPO, "compile.ts"), c.file, bc]);
+  const comp = await run(["bun", join(REPO, "compile.ts"), "-s", c.file, bc]);
   if (comp.code !== 0 || comp.timedOut) {
     const err = comp.stderr + comp.stdout;
     const kind = /Parse Error/i.test(err) ? "parse" : /Semantic Error/i.test(err) ? "semantic" : comp.timedOut ? "timeout" : "compile";

@@ -19,6 +19,7 @@ import { ForStmt } from "./classes/ForStmt";
 import { ReturnStmt } from "./classes/ReturnStmt";
 import { FunctionStmt } from "./classes/FunctionStmt";
 import { SemanticError } from "./SemanticAnalyzer";
+import { arityError, lookupHostFunction } from "./HostApi";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr } from "./classes/ObjectExpr";
@@ -59,7 +60,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       if (stmt instanceof VarStmt) this.globalNames.add(stmt.name.lexeme);
     }
     for (const stmt of statements) {
-      stmt.accept(this);
+      this.compileNode(stmt);
     }
     this.emit(Opcode.HALT);
     for (const fix of this.callFixups) {
@@ -67,6 +68,27 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       if (!fn) throw new Error(`internal: hoisted function '${fix.name}' was never compiled`);
       this.chunk.code[fix.operandPos] = fn.address;
     }
+  }
+
+  /**
+   * Compiles one node with currentLine set to that node's source line, then restores the
+   * enclosing node's line, so every instruction maps to the line of the node that emitted it
+   * (SPEC §10, D18). Statements and literals carry the line the parser recorded; other
+   * expressions use their operator, keyword or name token.
+   */
+  private compileNode(node: any): void {
+    const saved = this.currentLine;
+    const line = BytecodeCompiler.lineOf(node);
+    if (line > 0) this.currentLine = line;
+    try {
+      node.accept(this);
+    } finally {
+      this.currentLine = saved;
+    }
+  }
+
+  private static lineOf(node: any): number {
+    return node?.line ?? node?.operator?.line ?? node?.keyword?.line ?? node?.name?.line ?? node?.callee?.name?.line ?? node?.paren?.line ?? 0;
   }
 
   private emit(op: Opcode, operand?: number) {
@@ -91,19 +113,19 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
 
   // Stmt visitors
   visitExpressionStmt(stmt: ExpressionStmt): void {
-    stmt.expression.accept(this);
+    this.compileNode(stmt.expression);
     this.emit(Opcode.POP);
   }
 
   visitPrintStmt(stmt: PrintStmt): void {
-    stmt.expression.accept(this);
+    this.compileNode(stmt.expression);
     this.emit(Opcode.PRINT);
   }
 
   visitVarStmt(stmt: VarStmt): void {
     this.currentLine = stmt.name.line;
     if (stmt.initializer) {
-      stmt.initializer.accept(this);
+      this.compileNode(stmt.initializer);
     } else {
       this.emit(Opcode.CONST, this.addConstant(null));
     }
@@ -131,7 +153,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const enterPos = this.emitPlaceholder(Opcode.ENTER_BLOCK);
     const statements = stmt.statements ?? [];
     for (const s of statements) {
-      s.accept(this);
+      this.compileNode(s);
     }
     const newLocals = this.nextLocal - startLocal;
     this.patchOperand(enterPos, newLocals);
@@ -139,21 +161,21 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     this.endScope(startLocal);
   }
   visitIfStmt(stmt: IfStmt): void {
-    stmt.condition.accept(this);
+    this.compileNode(stmt.condition);
     const jumpIfFalsePos = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    stmt.thenBranch.accept(this);
+    this.compileNode(stmt.thenBranch);
     const jumpPos = this.emitPlaceholder(Opcode.JUMP);
     this.patchJump(jumpIfFalsePos);
     if (stmt.elseBranch) {
-      stmt.elseBranch.accept(this);
+      this.compileNode(stmt.elseBranch);
     }
     this.patchJump(jumpPos);
   }
   visitWhileStmt(stmt: WhileStmt): void {
     const loopStart = this.chunk.code.length;
-    stmt.condition.accept(this);
+    this.compileNode(stmt.condition);
     const exitJump = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    stmt.body.accept(this);
+    this.compileNode(stmt.body);
     this.emitJump(loopStart);
     this.patchJump(exitJump);
   }
@@ -165,23 +187,23 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
 
     // 1. Execute initializer (if present)
     if (stmt.initializer !== null) {
-      stmt.initializer.accept(this);
+      this.compileNode(stmt.initializer);
     }
 
     // 2. Loop start - evaluate condition
     const loopStart = this.chunk.code.length;
     let exitJump = -1;
     if (stmt.condition !== null) {
-      stmt.condition.accept(this);
+      this.compileNode(stmt.condition);
       exitJump = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
     }
 
     // 3. Execute body
-    stmt.body.accept(this);
+    this.compileNode(stmt.body);
 
     // 4. Execute increment (if present)
     if (stmt.increment !== null) {
-      stmt.increment.accept(this);
+      this.compileNode(stmt.increment);
       this.emit(Opcode.POP); // discard increment expression result
     }
 
@@ -216,7 +238,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Compile body
     this.functionDepth++;
     for (const st of stmt.body) {
-      st.accept(this);
+      this.compileNode(st);
     }
     this.functionDepth--;
     // Ensure return nil
@@ -233,7 +255,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   }
   visitReturnStmt(stmt: ReturnStmt): void {
     if (stmt.value) {
-      stmt.value.accept(this);
+      this.compileNode(stmt.value);
     } else {
       this.emit(Opcode.CONST, this.addConstant(null));
     }
@@ -254,7 +276,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Compile try block (a `var` here stays local, not global)
     this.tryDepth++;
     for (const s of stmt.tryBlock) {
-      s.accept(this);
+      this.compileNode(s);
     }
     this.tryDepth--;
 
@@ -279,7 +301,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
 
       // Compile catch block
       for (const s of stmt.catchBlock) {
-        s.accept(this);
+        this.compileNode(s);
       }
 
       const newLocals = this.nextLocal - startLocal;
@@ -292,7 +314,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
 
       // Compile catch block
       for (const s of stmt.catchBlock) {
-        s.accept(this);
+        this.compileNode(s);
       }
     }
 
@@ -307,11 +329,11 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   visitGroupingExpr(expr: Grouping): void {
-    expr.expression.accept(this);
+    this.compileNode(expr.expression);
   }
 
   visitUnaryExpr(expr: Unary): void {
-    expr.right.accept(this);
+    this.compileNode(expr.right);
     switch (expr.operator.type) {
       case TokenType.MINUS:
         this.emit(Opcode.NEG);
@@ -333,8 +355,8 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
         this.emitLogicalOr(expr);
         break;
       default:
-        expr.left.accept(this);
-        expr.right.accept(this);
+        this.compileNode(expr.left);
+        this.compileNode(expr.right);
         switch (expr.operator.type) {
           case TokenType.PLUS:
             this.emit(Opcode.ADD);
@@ -388,7 +410,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     this.emit(Opcode.GET_GLOBAL, nameIdx);
   }
   visitAssignExpr(expr: Assign): void {
-    expr.value.accept(this);
+    this.compileNode(expr.value);
     const local = this.resolveLocal(expr.name.lexeme);
     if (local !== undefined) {
       this.emit(Opcode.SET_LOCAL, local);
@@ -411,7 +433,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const calleeName = expr.callee.name.lexeme;
     // evaluate args
     for (const arg of expr.arguments) {
-      arg.accept(this);
+      this.compileNode(arg);
     }
     const fn = this.functions.get(calleeName);
     if (fn) {
@@ -426,6 +448,14 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(expr.arguments.length);
       return;
     }
+    // Anything else must be a registered built-in or host call (hostapi.json). An unknown name
+    // is a compile-time error, never a HOST_CALL that fails at runtime (SPEC 4.6, D3).
+    const host = lookupHostFunction(calleeName);
+    if (!host) {
+      throw new SemanticError(expr.callee.name, `Unknown function '${calleeName}'.`);
+    }
+    const arity = arityError(host, expr.arguments.length);
+    if (arity) throw new SemanticError(expr.paren, arity);
     const nameIdx = this.addConstant(calleeName);
     this.emit(Opcode.HOST_CALL, nameIdx);
     this.emit(expr.arguments.length);
@@ -435,7 +465,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   visitArrayExpr(expr: ArrayExpr): void {
     // Compile each element expression - pushes values onto stack
     for (const element of expr.elements) {
-      element.accept(this);
+      this.compileNode(element);
     }
     // Emit NEW_ARRAY with element count to create array from stack
     this.emit(Opcode.NEW_ARRAY, expr.elements.length);
@@ -447,7 +477,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       // Push key as string constant
       this.emit(Opcode.CONST, this.addConstant(prop.key));
       // Compile value expression
-      prop.value.accept(this);
+      this.compileNode(prop.value);
     }
     // Emit NEW_OBJECT with property count
     this.emit(Opcode.NEW_OBJECT, expr.properties.length);
@@ -455,7 +485,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
 
   private emitPlaceholder(op: Opcode): number {
     const pos = this.chunk.code.length;
-    this.chunk.code.push(op, 0); // placeholder operand
+    this.emit(op, 0); // placeholder operand, patched later; keeps lineMap aligned with code (D18)
     return pos;
   }
 
@@ -504,9 +534,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   //   a && b:  a; JIF Lfalse; b; NOT; NOT; JUMP Lend; Lfalse: CONST false; Lend:
   //   a || b:  a; JIF Lright; CONST true; JUMP Lend; Lright: b; NOT; NOT; Lend:
   private emitLogicalAnd(expr: Binary) {
-    expr.left.accept(this);
+    this.compileNode(expr.left);
     const toFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    expr.right.accept(this);
+    this.compileNode(expr.right);
     this.emit(Opcode.NOT);
     this.emit(Opcode.NOT);
     const toEnd = this.emitPlaceholder(Opcode.JUMP);
@@ -516,12 +546,12 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   private emitLogicalOr(expr: Binary) {
-    expr.left.accept(this);
+    this.compileNode(expr.left);
     const toRight = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
     this.emit(Opcode.CONST, this.addConstant(true));
     const toEnd = this.emitPlaceholder(Opcode.JUMP);
     this.patchJump(toRight);
-    expr.right.accept(this);
+    this.compileNode(expr.right);
     this.emit(Opcode.NOT);
     this.emit(Opcode.NOT);
     this.patchJump(toEnd);

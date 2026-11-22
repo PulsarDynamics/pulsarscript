@@ -1,4 +1,3 @@
-// @xfail vm D5 built-in missing from the Go VM host-call whitelist
 print(parseInt("42", 10));
 print(parseInt("1A", 16));
 print(parseFloat("3.14"));

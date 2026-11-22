@@ -1,0 +1,2 @@
+// No default budget used to mean this hung forever (D10); now it stops with a budget error.
+while (true) { }

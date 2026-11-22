@@ -1,2 +1,0 @@
-// @xfail all D10 no default step/time budget in vmrun or the interpreter; the runner times out
-while (true) { }

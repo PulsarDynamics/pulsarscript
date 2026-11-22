@@ -1,3 +1,2 @@
-// @xfail vm D5 built-in missing from the Go VM host-call whitelist
 print(toUpper("abc"));
 print(toLower("ABC"));

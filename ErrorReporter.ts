@@ -16,7 +16,7 @@ export class ErrorReporter {
     const parts: string[] = [];
     
     // Header
-    parts.push(`\n${errorType} Error at line ${token.line}:`);
+    parts.push(token.line > 0 ? `\n${errorType} Error at line ${token.line}:` : `\n${errorType} Error:`);
     parts.push(message);
     parts.push('');
     
