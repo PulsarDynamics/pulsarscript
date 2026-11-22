@@ -1,5 +1,4 @@
-// @xfail interp D3 analyzer rejects the unknown name at compile time
 try {
-  try { notAFunction(); } catch (inner) { print("inner"); }
+  try { var x = 1 / 0; } catch (inner) { print("inner"); }
   print("between");
 } catch (outer) { print("outer"); }
