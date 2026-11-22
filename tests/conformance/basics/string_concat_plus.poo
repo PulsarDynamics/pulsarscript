@@ -1,2 +1,1 @@
-// @xfail vm D6 "+" on strings is a runtime error on the VM
 print("foo" + "bar");

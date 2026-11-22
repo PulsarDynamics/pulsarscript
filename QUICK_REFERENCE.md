@@ -12,7 +12,7 @@ bun run repl
 | `.exit` | Exit REPL |
 | `.clear` | Clear screen |
 | `.reset` | Reset interpreter |
-| `.strict [on\|off]` | Toggle strict mode |
+| `.strict [on\|off]` | Toggle checked built-in arguments (on by default) |
 | `.history` | Show history |
 | `.multiline` | Multi-line input mode |
 
@@ -163,18 +163,17 @@ print(kvGet("key"));                             // 123
 kvDelete("key");
 ```
 
-## Strict Mode
+## Types
 
 ```javascript
-// Enable in REPL
-.strict on
-
-// In strict mode:
-1 + "2"                    // ERROR!
-concat(1, "2")             // "12" (OK)
-toUpper(123)               // ERROR!
+1 + "2"                    // "12" (+ concatenates when either side is a string)
+true + 1                   // ERROR: arithmetic needs numbers
+toUpper(123)               // ERROR: wrong argument type
 toUpper(string(123))       // "123" (OK)
+[1, 2] == [1, 2]           // true (arrays and objects compare by contents)
 ```
+
+`.strict off` in the REPL makes built-ins coerce their arguments instead of failing. It exists for old embedders and is not part of the language.
 
 ## Examples
 
@@ -251,5 +250,5 @@ Call stack:
 - Use `.multiline` for complex functions
 - Use `.reset` if state gets confusing
 - Use `.history` to review commands
-- In strict mode, use `concat()` instead of `+` for mixed types
+- `arrayPush`, `objSet` and friends return a new value: write `a = arrayPush(a, x);`
 - Use safe parsing (`parseInt`, `parseFloat`) for user input

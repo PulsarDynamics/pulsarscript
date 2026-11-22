@@ -1,0 +1,7 @@
+// == compares arrays and objects by contents (SPEC 4.3).
+print([1, [2]] == [1, [2]]);
+print([1] == [1, 2]);
+print({a: 1, b: [2]} == {b: [2], a: 1});
+print({a: 1} == {a: "1"});
+print([] == {});
+print(arrayIndexOf([[1], [2]], [2]));

@@ -31,14 +31,18 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       "typeOf","number","string","clock","random","randomInt",
       "abs","floor","ceil","round","sqrt","pow","min","max","clamp",
       "len","toUpper","toLower","trim","indexOf","substr",
-      "parseInt","parseFloat","toNumberOr","isInteger","isFinite","concat"
+      "parseInt","parseFloat","toNumberOr","isInteger","isFinite","concat",
+      "arrayLen","arrayPush","arrayPop","arraySlice","arrayConcat","arrayIndexOf",
+      "objKeys","objValues","objHas","objGet","objSet"
     ]);
 
     private static builtinArity = new Map<string, number>([
       ["typeOf", 1],["number",1],["string",1],["clock",0],["random",0],["randomInt",2],
       ["abs",1],["floor",1],["ceil",1],["round",1],["sqrt",1],["pow",2],["min",2],["max",2],["clamp",3],
       ["len",1],["toUpper",1],["toLower",1],["trim",1],["indexOf",2],["substr",3],
-      ["parseInt",2],["parseFloat",1],["toNumberOr",2],["isInteger",1],["isFinite",1],["concat",-1]
+      ["parseInt",2],["parseFloat",1],["toNumberOr",2],["isInteger",1],["isFinite",1],["concat",-1],
+      ["arrayLen",1],["arrayPush",-1],["arrayPop",1],["arraySlice",3],["arrayConcat",-1],["arrayIndexOf",2],
+      ["objKeys",1],["objValues",1],["objHas",2],["objGet",2],["objSet",3]
     ]);
 
     private static isBuiltin(name: string): boolean {

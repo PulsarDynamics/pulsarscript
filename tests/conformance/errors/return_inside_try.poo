@@ -1,0 +1,11 @@
+// return inside try returns normally and leaves no handler behind (D19).
+function f() {
+  try { return 1; } catch (e) { return 2; }
+}
+function g() {
+  try { return 10; } catch (e) { }
+}
+print(f());
+print(g());
+var x = 1 / 0;
+print("unreachable");

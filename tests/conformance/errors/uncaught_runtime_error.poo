@@ -1,3 +1,2 @@
-// @xfail interp D6 non-strict interp coerces abs("x") to NaN instead of erroring
 print("start");
 print(abs("x"));

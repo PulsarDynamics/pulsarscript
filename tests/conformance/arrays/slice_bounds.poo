@@ -1,0 +1,7 @@
+var a = [1, 2, 3, 4];
+print(arraySlice(a, -5, 2));
+print(arraySlice(a, 2, 99));
+print(arraySlice(a, 3, 1));
+print(arraySlice(a, 1.9, 3.2));
+print(arrayConcat(a, [5], []));
+print(arrayPop([]));
