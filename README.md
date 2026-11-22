@@ -59,7 +59,7 @@ go run ./cmd/vmrun -inspect script.json
 - ✅ Try/catch exception handling
 - ✅ Arrays: `[1, 2, 3]`, array host calls
 - ✅ Objects: `{name: "value"}`, object host calls  
-- ✅ 54 built-ins and host calls, listed in [`hostapi.json`](hostapi.json) (SPEC §8); unknown names fail at compile time
+- ✅ 53 built-ins and host calls, listed in [`hostapi.json`](hostapi.json) (SPEC §8); unknown names fail at compile time
 - ✅ Source mapping for error line numbers
 - ✅ Default step, time and call-depth budgets (SPEC §7)
 
