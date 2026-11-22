@@ -1,0 +1,6 @@
+print(0 && "x");
+print(nil || "y");
+print(nil && 1);
+print("a" || false);
+print(false || true && false);
+print(true || false && false);

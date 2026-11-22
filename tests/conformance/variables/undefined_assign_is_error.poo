@@ -1,2 +1,1 @@
-// @xfail vm D3 assigning an undeclared name silently creates a global on the VM
 nope = 1;

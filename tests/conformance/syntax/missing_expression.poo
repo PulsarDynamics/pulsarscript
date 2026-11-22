@@ -1,3 +1,2 @@
-// @xfail all D13 parser swallows the error and continues
 var x = ;
 print("after");

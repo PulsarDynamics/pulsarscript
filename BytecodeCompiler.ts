@@ -18,6 +18,7 @@ import { WhileStmt } from "./classes/WhileStmt";
 import { ForStmt } from "./classes/ForStmt";
 import { ReturnStmt } from "./classes/ReturnStmt";
 import { FunctionStmt } from "./classes/FunctionStmt";
+import { SemanticError } from "./SemanticAnalyzer";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr } from "./classes/ObjectExpr";
@@ -32,6 +33,17 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   scopeStack: Map<string, number>[] = [new Map()];
   nextLocal = 0;
   functions: Map<string, FunctionEntry> = new Map();
+  /** Top-level function names, collected before code generation so calls can precede declarations (D2). */
+  hoisted: Set<string> = new Set();
+  /** CALL operands emitted before their callee was compiled; patched in compile(). */
+  callFixups: { operandPos: number; name: string }[] = [];
+  /** Every top-level `var` name in the file, collected up front: these are the globals (SPEC 6, D1). */
+  globalNames: Set<string> = new Set();
+  /** Globals declared so far, to reject a second top-level `var` of the same name. */
+  declaredGlobals: Set<string> = new Set();
+  /** Nesting depth of function bodies and try blocks being compiled. */
+  functionDepth = 0;
+  tryDepth = 0;
   currentLine = 1; // Track current source line for error mapping
 
   static compile(statements: Stmt[]): Chunk {
@@ -41,10 +53,20 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   }
 
   compile(statements: Stmt[]): void {
+    // Hoist: every top-level function is callable from anywhere in the file (SPEC 4.6, D2).
+    for (const stmt of statements) {
+      if (stmt instanceof FunctionStmt) this.hoisted.add(stmt.name.lexeme);
+      if (stmt instanceof VarStmt) this.globalNames.add(stmt.name.lexeme);
+    }
     for (const stmt of statements) {
       stmt.accept(this);
     }
     this.emit(Opcode.HALT);
+    for (const fix of this.callFixups) {
+      const fn = this.functions.get(fix.name);
+      if (!fn) throw new Error(`internal: hoisted function '${fix.name}' was never compiled`);
+      this.chunk.code[fix.operandPos] = fn.address;
+    }
   }
 
   private emit(op: Opcode, operand?: number) {
@@ -85,8 +107,23 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     } else {
       this.emit(Opcode.CONST, this.addConstant(null));
     }
+    if (this.isTopLevel()) {
+      // Top-level variables are globals, visible inside every function (SPEC 6, D1).
+      const name = stmt.name.lexeme;
+      if (this.declaredGlobals.has(name)) {
+        throw new SemanticError(stmt.name, "Variable with this name already declared in this scope.");
+      }
+      this.declaredGlobals.add(name);
+      this.emit(Opcode.DEFINE_GLOBAL, this.addConstant(name));
+      return;
+    }
     const slot = this.declareLocal(stmt.name.lexeme);
     this.emit(Opcode.SET_LOCAL, slot);
+  }
+
+  /** True outside every function body, block and try block: where a `var` declares a global. */
+  private isTopLevel(): boolean {
+    return this.functionDepth === 0 && this.tryDepth === 0 && this.scopeStack.length === 1;
   }
   visitBlockStmt(stmt: any): void {
     const startLocal = this.nextLocal;
@@ -177,9 +214,11 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.declareLocal(p.lexeme);
     }
     // Compile body
+    this.functionDepth++;
     for (const st of stmt.body) {
       st.accept(this);
     }
+    this.functionDepth--;
     // Ensure return nil
     this.emit(Opcode.CONST, this.addConstant(null));
     this.emit(Opcode.RETURN);
@@ -212,10 +251,12 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Emit TRY_PUSH with placeholder offset to catch block
     const tryPushPos = this.emitPlaceholder(Opcode.TRY_PUSH);
 
-    // Compile try block
+    // Compile try block (a `var` here stays local, not global)
+    this.tryDepth++;
     for (const s of stmt.tryBlock) {
       s.accept(this);
     }
+    this.tryDepth--;
 
     // Pop exception handler (no exception occurred)
     this.emit(Opcode.TRY_POP);
@@ -340,6 +381,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(Opcode.GET_LOCAL, local);
       return;
     }
+    if (!this.globalNames.has(expr.name.lexeme)) {
+      throw new SemanticError(expr.name, "Variable is not defined.");
+    }
     const nameIdx = this.addConstant(expr.name.lexeme);
     this.emit(Opcode.GET_GLOBAL, nameIdx);
   }
@@ -350,6 +394,10 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       this.emit(Opcode.SET_LOCAL, local);
       this.emit(Opcode.GET_LOCAL, local);
     } else {
+      if (!this.globalNames.has(expr.name.lexeme)) {
+        // Assigning an undeclared name is an error, not an implicit global (SPEC 4.5, D3).
+        throw new SemanticError(expr.name, "Cannot assign to undefined variable.");
+      }
       const nameIdx = this.addConstant(expr.name.lexeme);
       this.emit(Opcode.SET_GLOBAL, nameIdx);
       // Leave the assigned value on the stack to support expression contexts
@@ -368,6 +416,13 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const fn = this.functions.get(calleeName);
     if (fn) {
       this.emit(Opcode.CALL, fn.address);
+      this.emit(expr.arguments.length);
+      return;
+    }
+    if (this.hoisted.has(calleeName)) {
+      // Declared later in the file: emit the call now, patch the address once it is compiled.
+      this.emit(Opcode.CALL, 0);
+      this.callFixups.push({ operandPos: this.chunk.code.length - 1, name: calleeName });
       this.emit(expr.arguments.length);
       return;
     }
@@ -444,21 +499,31 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     this.nextLocal = startLocal;
   }
 
+  // `a && b` and `a || b` short-circuit and always produce a boolean (SPEC 4.4, D16).
+  // The VM's JUMP_IF_FALSE pops its condition, so the result is rebuilt on each path:
+  //   a && b:  a; JIF Lfalse; b; NOT; NOT; JUMP Lend; Lfalse: CONST false; Lend:
+  //   a || b:  a; JIF Lright; CONST true; JUMP Lend; Lright: b; NOT; NOT; Lend:
   private emitLogicalAnd(expr: Binary) {
     expr.left.accept(this);
-    const jumpIfFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    this.emit(Opcode.POP);
+    const toFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
     expr.right.accept(this);
-    this.patchJump(jumpIfFalse);
+    this.emit(Opcode.NOT);
+    this.emit(Opcode.NOT);
+    const toEnd = this.emitPlaceholder(Opcode.JUMP);
+    this.patchJump(toFalse);
+    this.emit(Opcode.CONST, this.addConstant(false));
+    this.patchJump(toEnd);
   }
 
   private emitLogicalOr(expr: Binary) {
     expr.left.accept(this);
-    const jumpIfFalse = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
-    const jumpOverRight = this.emitPlaceholder(Opcode.JUMP);
-    this.patchJump(jumpIfFalse);
-    this.emit(Opcode.POP);
+    const toRight = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
+    this.emit(Opcode.CONST, this.addConstant(true));
+    const toEnd = this.emitPlaceholder(Opcode.JUMP);
+    this.patchJump(toRight);
     expr.right.accept(this);
-    this.patchJump(jumpOverRight);
+    this.emit(Opcode.NOT);
+    this.emit(Opcode.NOT);
+    this.patchJump(toEnd);
   }
 }

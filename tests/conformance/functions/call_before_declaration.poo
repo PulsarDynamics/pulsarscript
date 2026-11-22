@@ -1,0 +1,2 @@
+print(later(2));
+function later(x) { return x * 10; }

@@ -1,2 +1,1 @@
-// @xfail all D13 parser swallows the error and continues
 print((1 + 2);

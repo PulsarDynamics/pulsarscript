@@ -1,4 +1,3 @@
-// @xfail vm D1 top-level vars compile as locals; functions see undefined global
 var count = 0;
 function inc() { count = count + 1; }
 inc();

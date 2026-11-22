@@ -1,3 +1,2 @@
-// @xfail all D13 parse errors are swallowed and the statement is dropped
 print(1e3);
 print("after");

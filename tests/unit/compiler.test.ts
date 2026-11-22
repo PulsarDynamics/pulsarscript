@@ -113,18 +113,42 @@ describe("compiler: structural invariants", () => {
     expect(fn.locals).toBe(3);
   });
 
-  test("current behaviour: top-level var compiles to a local slot (D1)", () => {
-    const ops = decode(compile("var x = 1;\n")).map((i) => i.op);
-    expect(ops).toContain(Opcode.SET_LOCAL);
-    expect(ops).not.toContain(Opcode.DEFINE_GLOBAL);
+  test("top-level var compiles to DEFINE_GLOBAL; functions read it with GET_GLOBAL (D1)", () => {
+    const ops = decode(compile("var x = 1;\nfunction f() { return x; }\n")).map((i) => i.op);
+    expect(ops).toContain(Opcode.DEFINE_GLOBAL);
+    expect(ops).toContain(Opcode.GET_GLOBAL);
+    expect(ops).not.toContain(Opcode.SET_LOCAL);
   });
 
-  test.todo("SPEC: top-level var compiles to DEFINE_GLOBAL (D1)");
-
-  test("current behaviour: a call to a later-declared function compiles as HOST_CALL (D2)", () => {
-    const ops = decode(compile("function a() { return b(); }\nfunction b() { return 1; }\n")).map((i) => i.op);
-    expect(ops).toContain(Opcode.HOST_CALL);
+  test("vars in blocks, functions and try blocks stay local (D1)", () => {
+    for (const src of ["{ var b = 1; print(b); }", "function f() { var c = 1; return c; }", "try { var t = 1; } catch (e) { }"]) {
+      const ops = decode(compile(src)).map((i) => i.op);
+      expect(ops).not.toContain(Opcode.DEFINE_GLOBAL);
+    }
   });
 
-  test.todo("SPEC: calls to functions declared later in the file compile as CALL (D2)");
+  test("unknown names and duplicate globals are compile-time errors (D3)", () => {
+    expect(() => compile("print(nope);")).toThrow("Variable is not defined.");
+    expect(() => compile("nope = 1;")).toThrow("Cannot assign to undefined variable.");
+    expect(() => compile("var x = 1;\nvar x = 2;")).toThrow("already declared");
+  });
+
+  test("a call to a later-declared function compiles as CALL to its address (D2)", () => {
+    const chunk = compile("function a() { return b(); }\nfunction b() { return 1; }\n");
+    const ins = decode(chunk);
+    expect(ins.map((i) => i.op)).not.toContain(Opcode.HOST_CALL);
+    const call = ins.find((i) => i.op === Opcode.CALL)!;
+    const b = chunk.functions!.find((f) => f.name === "b")!;
+    expect(call.args).toEqual([b.address, 0]);
+  });
+
+  test("a top-level call before the declaration compiles as CALL (D2)", () => {
+    const chunk = compile("print(f());\nfunction f() { return 1; }\n");
+    const call = decode(chunk).find((i) => i.op === Opcode.CALL)!;
+    expect(call.args[0]).toBe(chunk.functions![0].address);
+  });
+
+  test("unknown names still compile as host calls", () => {
+    expect(decode(compile("print(typeOf(1));\n")).map((i) => i.op)).toContain(Opcode.HOST_CALL);
+  });
 });
