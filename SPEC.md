@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0 records the language **as it behaves today** (November 2026). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.1 records the language **as it behaves today** (November 2026; D1, D2, D13 and D16 fixed, D3 in part). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -34,7 +34,7 @@ A letter or `_`, followed by letters, digits or `_`. Identifiers are case-sensit
 
 Decimal digits with an optional fractional part: `42`, `3.25`, `0.5`. There are no exponents (`1e3`), hex, octal, binary or digit separators. A trailing dot (`1.`) is a lexical error. Numbers are IEEE-754 double precision.
 
-> ⚠ **D13**: `1e3` currently lexes as `1` followed by the identifier `e3`. The parser then swallows the resulting syntax error and **drops the statement**. It must be a syntax error.
+`1e3` lexes as `1` followed by the identifier `e3`, which is a syntax error (fixed in D13: previously the statement was silently dropped).
 
 ### 2.4 String literals
 
@@ -105,15 +105,11 @@ Arithmetic on any other non-number is a runtime error.
 
 ### 4.4 Logical operators
 
-`!x` is `true` when `x` is falsy. `a && b` and `a || b` evaluate to booleans and **must short-circuit**: `b` is not evaluated when `a` decides the result.
-
-> ⚠ **D16**: `interp` evaluates both operands; `vm` fails with "stack underflow" for any `&&` or `||` expression. Avoid both operators on the `vm` until fixed; nest `if` statements instead.
+`!x` is `true` when `x` is falsy. `a && b` and `a || b` always evaluate to `true` or `false` (never to an operand) and **short-circuit**: `b` is not evaluated when `a` decides the result. `&&` binds tighter than `||`. (Fixed in D16.)
 
 ### 4.5 Assignment
 
-`name = expr` assigns to an existing variable and evaluates to the assigned value, so `a = b = 5` sets both. Assigning to an undeclared name is an error.
-
-> ⚠ **D3**: the `vm` silently creates a global instead of raising an error.
+`name = expr` assigns to an existing variable and evaluates to the assigned value, so `a = b = 5` sets both. Assigning to an undeclared name is a compile-time error. (Fixed on the `vm` in D3; it used to create a global silently.)
 
 Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`; see §8 for host calls).
 
@@ -121,8 +117,9 @@ Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`;
 
 `name(arg, …)` calls a user function declared with `function` or a built-in (§8). At most 255 arguments. Only identifiers can be called.
 
-> ⚠ **D2**: calling a function declared **later in the file** fails: `interp` reports "Variable is not defined" and `vm` compiles it as a host call ("hostcall b not allowed"). Calls must resolve to every function declared anywhere at the top level.
-> ⚠ **D3**: on the `vm`, an unknown name is only detected at runtime ("hostcall … not allowed"). It must be a compile-time error.
+**Top-level functions are hoisted:** a call resolves to any function declared at the top level of the file, including one declared later and including calls made before the declaration. Functions declared inside a block are callable after their declaration within that block. (Fixed in D2.)
+
+> ⚠ **D3**: on the `vm`, calling an unknown function name is only detected at runtime ("hostcall … not allowed"), where `try`/`catch` can catch it. It must be a compile-time error; this needs the host-call registry (Phase 1, A3). Unknown *variable* names are already compile-time errors on both runtimes.
 
 ## 5. Statements
 
@@ -141,15 +138,14 @@ Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`;
 
 There is no `break`, `continue`, `switch`, `do…while`, `for…of`, `const` or `let` in v0.
 
-> ⚠ **D13**: a syntax error inside any statement is currently swallowed: the statement is replaced by `nil;` and parsing continues, so **broken code runs silently with parts missing**. A syntax error must stop compilation and report its line.
+A syntax error stops compilation. The parser recovers after each error so that **every** syntax error in the file is reported in one pass, each with its line. (Fixed in D13: errors used to be swallowed and the statement silently dropped.)
 
 ## 6. Scope and variables
 
 - **Lexical block scoping.** Every block, function body and `for` loop opens a scope. An inner declaration shadows outer ones until the scope ends.
 - Declaring the same name twice in one scope is an error.
-- **Top-level variables are globals** and are visible inside functions declared anywhere in the file.
-
-> ⚠ **D1** (**critical on `vm`**): the compiler stores top-level variables as local slots, so any function that reads or writes a top-level variable fails with "undefined global". `interp` behaves correctly except that it rejects a function body that refers to a global declared further down.
+- **Top-level variables are globals**: a `var` outside every function, block and `try` block. Function bodies may read and assign globals declared anywhere in the file; at the top level a global must be declared before it is used. (Fixed in D1: the `vm` used to compile them as locals that functions could not see.)
+- A `var` inside a block, function body, `for` initializer or `try` block is local.
 
 - Function parameters and `var`s inside a function are local to each call.
 - There are no closures in v0. A nested function cannot capture the enclosing function's locals.
@@ -159,8 +155,8 @@ There is no `break`, `continue`, `switch`, `do…while`, `for…of`, `const` or 
 | Kind | When | Effect |
 | --- | --- | --- |
 | Lexical | unexpected character, unterminated string | compilation fails |
-| Syntax | grammar violation | compilation must fail (⚠ **D13**) |
-| Semantic | undefined name, duplicate declaration | compile-time on `interp`; `vm` partly at runtime (⚠ **D3**) |
+| Syntax | grammar violation | compilation fails; all syntax errors are reported |
+| Semantic | undefined variable, assignment to an undeclared name, duplicate declaration | compile-time on both runtimes (unknown *function* names: runtime on the `vm`, ⚠ **D3**) |
 | Runtime | type errors, division by zero, unknown host call, stack overflow, budget exceeded | unwinds to the nearest `try`; uncaught, the program stops with a message and source line |
 
 `try { A } catch (e) { B }`: if a runtime error occurs in `A`, execution continues in `B` with `e` bound to the error. Errors that occur before execution (lexical, syntax, semantic) cannot be caught.
@@ -222,7 +218,11 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 
 > ⚠ **D9**: `vmrun -disasm` decodes `CALL` with one operand, so listings drift after the first call.
 
+- Top-level variables use `DEFINE_GLOBAL` / `GET_GLOBAL` / `SET_GLOBAL`; all other variables use local slots.
+
 - `lineMap[i]` is the source line for `code[i]`, present when compiled with `-s`.
+
+> ⚠ **D18**: the compiler only updates its current line at `var` statements, and jump placeholders add no `lineMap` entries, so line numbers in `vm` runtime errors are unreliable.
 - There is no version field yet. Phase 1 adds a header `{format, version, compiler, sourceHash}`, and the loader will reject unknown versions.
 - `YIELD`, `SLEEP`, `EMIT_EVENT` and `POLL_EVENT` exist in the VM but are never emitted by the compiler in v0.
 
@@ -234,22 +234,23 @@ Produced by `compile.ts`, consumed by the Go VM. JSON:
 
 ## 12. Defect register
 
-| ID | Summary | Runtimes | Phase |
+| ID | Summary | Runtimes | Status |
 | --- | --- | --- | --- |
-| D1 | Top-level variables compile as locals; functions cannot see globals | vm (interp: globals declared later) | 1 |
-| D2 | Calls to functions declared later fail | both | 1 |
-| D3 | Unknown names and undeclared assignment not caught at compile time | vm | 1 |
-| D4 | Array and object literals unsupported | interp | 1 (or retire interp, A1) |
-| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | 1 |
-| D6 | `+` with strings and implicit coercion differ | both | 1 |
-| D7 | Caught error value unspecified | both | 1 |
-| D8 | `loadModule` whitelisted but does nothing | vm | 3 |
-| D9 | Disassembler mis-decodes `CALL` | vmrun | 1 |
-| D10 | No default step/time budget in `vmrun` and `runSource` | both | 1 |
-| D11 | PulsarOS frontend script calls cannot reach the API | integration | 4 |
-| D12 | App manifest `script` shape differs between frontend and API | integration | 4 |
-| D13 | Syntax errors are swallowed; statements silently dropped | both | 1 |
-| D14 | Number formatting (`-0`, exponent form) | vm | 1 |
-| D15 | `arrayPush`/`arrayPop` do not mutate the variable's array | vm | 2 |
-| D16 | `&&`/`\|\|`: no short-circuit (interp), stack underflow (vm) | both | 1 |
-| D17 | Arrays and objects print as `<?>` | vm | 2 |
+| D1 | Top-level variables compiled as locals; functions could not see globals | vm (interp: globals declared later) | **Fixed** |
+| D2 | Calls to functions declared later failed | both | **Fixed** |
+| D3 | Unknown names not caught at compile time | vm | **Partly fixed**: variables and assignments done; unknown function names need the host-call registry (Phase 1) |
+| D4 | Array and object literals unsupported | interp | Open: Phase 1 (or retire interp, A1) |
+| D5 | Built-in sets differ; whitelisted VM built-ins return `nil`; the analyzer rejects interp natives | both | Open: Phase 1 (registry) |
+| D6 | `+` with strings and implicit coercion differ | both | Open: needs decision |
+| D7 | Caught error value unspecified | both | Open: needs decision |
+| D8 | `loadModule` whitelisted but does nothing | vm | Open: Phase 3 |
+| D9 | Disassembler mis-decodes `CALL` | vmrun | Open: Phase 1 |
+| D10 | No default step/time budget in `vmrun` and `runSource` | both | Open: Phase 1 |
+| D11 | PulsarOS frontend script calls cannot reach the API | integration | Open: Phase 4 |
+| D12 | App manifest `script` shape differs between frontend and API | integration | Open: Phase 4 |
+| D13 | Syntax errors were swallowed; statements silently dropped | both | **Fixed** |
+| D14 | Number formatting (`-0`, exponent form) | vm | Open: Phase 1 |
+| D15 | `arrayPush`/`arrayPop` do not mutate the variable's array | vm | Open: Phase 2 |
+| D16 | `&&`/`\|\|`: no short-circuit (interp), stack underflow (vm) | both | **Fixed** |
+| D17 | Arrays and objects print as `<?>` | vm | Open: Phase 2 |
+| D18 | Line map only tracks `var` statements; runtime error lines unreliable | vm | Open: Phase 1 |
