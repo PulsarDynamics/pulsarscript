@@ -1,0 +1,8 @@
+// If a nested compound update fails during evaluation, the container stays unchanged.
+var grid = [[10, 20]];
+try {
+  grid[0][1] /= 0;
+} catch (e) {
+  print(e.kind);
+}
+print(grid);

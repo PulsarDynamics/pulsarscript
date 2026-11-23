@@ -1,0 +1,5 @@
+import { pubWeighted as weighted, inc as addCounter } from "./.fixtures/math_util.puls";
+var hiddenHelper = 999;
+print(weighted(4, 2));
+print(addCounter(7));
+print(hiddenHelper);

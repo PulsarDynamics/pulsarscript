@@ -53,6 +53,16 @@ export enum Opcode {
   FUNC = 45,       // operand: function address; pushes a function value
   CALL_VALUE = 46, // operand: arg count; calls the function value below the arguments
   ITER_ITEMS = 47, // pops x; pushes the items for...of walks (array, object keys, characters)
+  // Bytecode version 3 (SPEC v1.0)
+  CLOSURE = 48,       // operand: function address; allocates closure capturing upvalues
+  GET_UPVALUE = 49,   // operand: upvalue slot; pushes captured variable value
+  SET_UPVALUE = 50,   // operand: upvalue slot; stores top-of-stack and leaves it on stack
+  CLOSE_UPVALUE = 51, // operand: local slot; closes open upvalue pointing to base + slot
+}
+
+export interface UpvalueDesc {
+  isLocal: boolean;
+  index: number;
 }
 
 export interface FunctionEntry {
@@ -60,6 +70,8 @@ export interface FunctionEntry {
   address: number;
   arity: number;
   locals: number;
+  upvalues?: UpvalueDesc[];
+  selfSlot?: number;
 }
 
 export interface Chunk {
@@ -67,6 +79,8 @@ export interface Chunk {
   code: number[]; // sequence of opcodes and operands
   functions?: FunctionEntry[];
   lineMap?: number[]; // instruction index → source line number
+  sources?: string[]; // source file paths (index 0 = entry module)
+  fileMap?: number[]; // instruction index → sources[] index
 }
 
 /** Identifies a PulsarScript bytecode file (SPEC §10, decision A5). */
@@ -78,8 +92,9 @@ export const BYTECODE_FORMAT = "pulsarscript-bytecode";
  *   0: no header (before SPEC v0.4); still loaded.
  *   1: header {format, version, compiler, sourceHash}; otherwise the same as 0.
  *   2: adds INDEX_GET, INDEX_SET, MOD, FUNC, CALL_VALUE and ITER_ITEMS (SPEC v0.5).
+ *   3: adds CLOSURE, GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE and source maps (SPEC v1.0).
  */
-export const BYTECODE_VERSION = 2;
+export const BYTECODE_VERSION = 3;
 
 export interface BytecodeHeader {
   format: typeof BYTECODE_FORMAT;

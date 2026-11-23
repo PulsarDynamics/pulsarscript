@@ -1,4 +1,4 @@
 runtime
 3
 string
-["kind", "line", "message"]
+["kind", "line", "message", "stack"]

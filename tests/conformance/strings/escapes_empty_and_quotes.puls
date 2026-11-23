@@ -1,0 +1,5 @@
+print(len(""));
+print(len("\""));
+print("\"");
+print("\\");
+

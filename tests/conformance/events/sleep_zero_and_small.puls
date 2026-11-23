@@ -1,0 +1,4 @@
+print(sleep(0));
+print(sleep(2));
+print("awake");
+

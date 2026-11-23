@@ -1,0 +1,6 @@
+print(replace("a-b-c", "-", ":"));
+print(replace("aaa", "aa", "X"));
+print(replace("abc", "$", "$$"));
+print(replace("ab", "", "-"));
+print(replace("", "", "-"));
+

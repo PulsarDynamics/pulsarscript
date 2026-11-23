@@ -1,0 +1,12 @@
+var log = [];
+try {
+  var inTry = "t";
+  var x = 1 / 0;
+} catch (e) {
+  var a = 10;
+  var b = 20;
+  log[len(log)] = e.kind;
+  log[len(log)] = a + b;
+  log[len(log)] = len(e.stack) >= 1;
+}
+print(log);

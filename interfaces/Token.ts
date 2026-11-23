@@ -5,4 +5,5 @@ export interface Token {
     lexeme: string;
     literal: any;
     line: number;
+    column?: number;
 }

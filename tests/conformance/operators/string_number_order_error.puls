@@ -1,0 +1,11 @@
+// Ordering strings against numbers is a catchable runtime error.
+try {
+  print("a" < 1);
+} catch (e) {
+  print(e.kind);
+}
+try {
+  print(1 >= "b");
+} catch (e) {
+  print(e.kind);
+}

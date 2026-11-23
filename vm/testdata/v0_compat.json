@@ -1,0 +1,5 @@
+{
+  "constants": ["compat-v0", 42],
+  "code": [0, 0, 13, 0, 1, 13, 24],
+  "functions": []
+}

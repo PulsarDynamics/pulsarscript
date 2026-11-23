@@ -1,0 +1,4 @@
+print(arrayReduce([1, 2, 3, 4], function(acc, x) { return acc + x; }, 0));
+print(arrayReduce(["a", "b", "c"], function(acc, x) { return acc + "-" + x; }, "start"));
+print(arrayReduce([], function(acc, x) { return acc + 1; }, 42));
+

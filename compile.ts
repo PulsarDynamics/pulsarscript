@@ -3,6 +3,9 @@ import { Parser, ParseError } from "./Parser";
 import { SemanticAnalyzer, SemanticError } from "./SemanticAnalyzer";
 import { BytecodeCompiler } from "./BytecodeCompiler";
 import { ErrorReporter } from "./ErrorReporter";
+import { linkModule } from "./Linker";
+import { ImportStmt } from "./classes/ImportStmt";
+import { ExportStmt } from "./classes/ExportStmt";
 import { withHeader } from "./Bytecode";
 import pkg from "./package.json";
 
@@ -60,10 +63,20 @@ try {
   const lexer = new Lexer(source);
   const tokens = lexer.scanTokens();
   const parser = new Parser(tokens);
-  const stmts = parser.parse();
+  let stmts = parser.parse();
+  let sources: string[] | undefined;
+  if (stmts.some((s) => s instanceof ImportStmt || s instanceof ExportStmt)) {
+    const linked = linkModule(inputPath, { entrySource: source });
+    stmts = linked.statements;
+    sources = linked.sources;
+  }
   // Same front end as the interpreter: scoping, unknown names and call arity are checked
   // against the source before any bytecode exists (SPEC 7).
-  new SemanticAnalyzer().analyze(stmts);
+  const analyzer = new SemanticAnalyzer();
+  analyzer.analyze(stmts);
+  for (const w of analyzer.warnings) {
+    console.warn(`warning: line ${w.line}: ${w.message}`);
+  }
 
   if (flags.check) {
     console.log(`✓ Valid: ${inputPath}`);
@@ -71,11 +84,13 @@ try {
   }
 
   // Compile to bytecode
-  const chunk = BytecodeCompiler.compile(stmts);
+  const chunk = BytecodeCompiler.compile(stmts, sources);
 
   // Optionally strip sourcemap for smaller output
   if (!flags.emitSourcemap) {
     delete (chunk as any).lineMap;
+    delete (chunk as any).fileMap;
+    delete (chunk as any).sources;
   }
 
   // Versioned header first (SPEC §10, A5): the VM rejects formats it does not know.

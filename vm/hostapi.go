@@ -28,6 +28,7 @@ type HostFunction struct {
 	Name       string      `json:"name"`
 	Provider   string      `json:"provider"` // "core": implemented by the VM; "host": supplied by HostCallbacks.HostCall
 	Capability string      `json:"capability,omitempty"`
+	Deprecated string      `json:"deprecated,omitempty"`
 	Params     []HostParam `json:"params"`
 	Returns    string      `json:"returns"`
 	Doc        string      `json:"doc"`
@@ -168,6 +169,8 @@ var opcodeInfo = map[byte]struct {
 	OpNewObject: {"NEW_OBJECT", 1}, OpObjGet: {"OBJ_GET", 0}, OpObjSet: {"OBJ_SET", 0},
 	OpIndexGet: {"INDEX_GET", 1}, OpIndexSet: {"INDEX_SET", 1}, OpMod: {"MOD", 0},
 	OpFunc: {"FUNC", 1}, OpCallValue: {"CALL_VALUE", 1}, OpIterItems: {"ITER_ITEMS", 0},
+	OpClosure: {"CLOSURE", 1}, OpGetUpvalue: {"GET_UPVALUE", 1},
+	OpSetUpvalue: {"SET_UPVALUE", 1}, OpCloseUpvalue: {"CLOSE_UPVALUE", 1},
 }
 
 // OpcodeName returns an opcode's mnemonic and operand count; ok is false for unknown opcodes.
@@ -197,9 +200,23 @@ func VerifyModule(mod Module) error {
 		if ip+operands >= len(code) {
 			return fmt.Errorf("%s at %d is missing operands", name, ip)
 		}
-		if op == OpFunc {
-			if _, ok := mod.Functions[code[ip+1]]; !ok {
-				return fmt.Errorf("FUNC at %d: no function at address %d", ip, code[ip+1])
+		if op == OpFunc || op == OpClosure {
+			fn, ok := mod.Functions[code[ip+1]]
+			if !ok {
+				return fmt.Errorf("%s at %d: no function at address %d", name, ip, code[ip+1])
+			}
+			for j, uv := range fn.Upvalues {
+				if uv.Index < 0 {
+					return fmt.Errorf("%s at %d: invalid upvalue %d index %d", name, ip, j, uv.Index)
+				}
+			}
+			if fn.SelfSlot != nil && (*fn.SelfSlot < 0 || *fn.SelfSlot >= fn.Locals) {
+				return fmt.Errorf("%s at %d: invalid selfSlot %d", name, ip, *fn.SelfSlot)
+			}
+		}
+		if op == OpGetUpvalue || op == OpSetUpvalue || op == OpCloseUpvalue {
+			if code[ip+1] < 0 {
+				return fmt.Errorf("%s at %d: negative operand %d", name, ip, code[ip+1])
 			}
 		}
 		if (op == OpIndexGet || op == OpIndexSet) && code[ip+1] != 0 && code[ip+1] != 1 {

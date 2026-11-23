@@ -1,0 +1,7 @@
+// parseFloat accepts scientific exponent strings just like number() and literals (LANG-18).
+print(parseFloat("1e3"));
+print(parseFloat(" -1.5e-2 "));
+print(parseFloat("1e3") == number("1e3"));
+print(parseFloat("1e"));
+print(parseFloat("0xff"));
+print(number("0xff"));

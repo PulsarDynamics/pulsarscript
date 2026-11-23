@@ -1,0 +1,8 @@
+import { VERSION, counter, add, bumpCounter } from "./.fixtures/math_util.puls";
+var x = 1;
+print(VERSION);
+print(counter);
+print(add(2, 5));
+print(bumpCounter(3));
+print(counter);
+print(x);

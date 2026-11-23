@@ -1,0 +1,2 @@
+var fn = function secret() { return 1; };
+print(secret());

@@ -1,0 +1,7 @@
+print(startsWith("hello.puls", "hello"));
+print(startsWith("hello.puls", "world"));
+print(endsWith("hello.puls", ".puls"));
+print(endsWith("hello.puls", ".js"));
+print(startsWith("", ""));
+print(endsWith("a😀", "😀"));
+

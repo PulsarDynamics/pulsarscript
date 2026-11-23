@@ -1,0 +1,6 @@
+var log = [];
+log[len(log)] = "before";
+print(yield());
+log[len(log)] = "after";
+print(log);
+

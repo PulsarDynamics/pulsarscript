@@ -1,0 +1,4 @@
+function make() {
+  const c = 1;
+  return function() { c = 2; };
+}

@@ -12,11 +12,13 @@ export class SetIndex implements Expr {
     target: IndexExpr;
     value: Expr;
     equals: Token;
+    operator: Token | null;
     line?: number;
-    constructor(target: IndexExpr, value: Expr, equals: Token) {
+    constructor(target: IndexExpr, value: Expr, equals: Token, operator: Token | null = null) {
       this.target = target;
       this.value = value;
       this.equals = equals;
+      this.operator = operator;
       this.line = equals.line;
     }
     accept<R>(visitor: ExprVisitor<R>): R {

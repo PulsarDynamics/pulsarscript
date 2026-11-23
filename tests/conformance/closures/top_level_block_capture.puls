@@ -1,0 +1,10 @@
+var getter;
+var setter;
+{
+  var secret = "init";
+  getter = function() { return secret; };
+  setter = function(v) { secret = v; };
+}
+print(getter());
+setter("updated");
+print(getter());

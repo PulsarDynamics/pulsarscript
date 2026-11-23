@@ -1,0 +1,9 @@
+var get;
+try {
+  var secret = 42;
+  get = function() { return secret; };
+  var boom = 1 / 0;
+} catch (e) {
+  print(e.kind);
+}
+print(get());

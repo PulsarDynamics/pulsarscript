@@ -1,22 +1,22 @@
 import type { Assign } from "./classes/Assign";
 import { Binary } from "./classes/Binary";
-import type { BlockStmt } from "./classes/BlockStmt";
+import { BlockStmt } from "./classes/BlockStmt";
 import type { Call } from "./classes/Call";
-import type { ExpressionStmt } from "./classes/ExpressionStmt";
+import { ExpressionStmt } from "./classes/ExpressionStmt";
 import { FunctionStmt } from "./classes/FunctionStmt";
-import type { ForStmt } from "./classes/ForStmt";
+import { ForStmt as ForStmtClass, type ForStmt } from "./classes/ForStmt";
 import type { Grouping } from "./classes/Grouping";
-import type { IfStmt } from "./classes/IfStmt";
+import { IfStmt } from "./classes/IfStmt";
 import { Literal } from "./classes/Literal";
-import type { PrintStmt } from "./classes/PrintStmt";
-import type { ReturnStmt } from "./classes/ReturnStmt";
+import { PrintStmt } from "./classes/PrintStmt";
+import { ReturnStmt } from "./classes/ReturnStmt";
 import type { Unary } from "./classes/Unary";
 import { VarStmt } from "./classes/VarStmt";
 import { Variable } from "./classes/Variable";
-import type { WhileStmt } from "./classes/WhileStmt";
+import { WhileStmt } from "./classes/WhileStmt";
 import type { ArrayExpr } from "./classes/ArrayExpr";
 import type { ObjectExpr } from "./classes/ObjectExpr";
-import type { TryCatchStmt } from "./classes/TryCatchStmt";
+import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { ErrorExpr } from "./classes/ErrorExpr";
 import { TokenType } from "./enums/TokenType";
 import type { Expr } from "./interfaces/Expr";
@@ -27,8 +27,13 @@ import type { Token } from "./interfaces/Token";
 import { arityError, lookupHostFunction } from "./HostApi";
 import { IndexExpr } from "./classes/IndexExpr";
 import { SetIndex } from "./classes/SetIndex";
-import type { BreakStmt } from "./classes/BreakStmt";
-import type { ForOfStmt } from "./classes/ForOfStmt";
+import { BreakStmt as BreakStmtClass, type BreakStmt } from "./classes/BreakStmt";
+import { ForOfStmt as ForOfStmtClass, type ForOfStmt } from "./classes/ForOfStmt";
+import type { TernaryExpr } from "./classes/TernaryExpr";
+import type { TemplateLiteralExpr } from "./classes/TemplateLiteralExpr";
+import type { FunctionExpr } from "./classes/FunctionExpr";
+import type { ImportStmt } from "./classes/ImportStmt";
+import { ExportStmt } from "./classes/ExportStmt";
 
 export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     // Built-ins and host calls come from hostapi.json (SPEC §8); they are callable, not values.
@@ -41,6 +46,10 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     private topLevelVars = new Set<string>();
     /** Top-level `const` names, so a function body cannot assign to one declared later. */
     private topLevelConsts = new Set<string>();
+    /** Nested block depth inside top-level script or functions. */
+    private blockDepth = 0;
+    /** Warnings emitted during semantic analysis (e.g., calls to deprecated APIs). */
+    public warnings: { line: number; column?: number; message: string }[] = [];
     /** Loops enclosing the current statement inside the current function (for break/continue). */
     private loopDepth = 0;
     /** Set while analyzing an expression statement or for-increment, where element assignment may appear. */
@@ -52,20 +61,83 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
     }
 
     analyze(statements: Stmt[]): void {
-      for (const statement of statements) {
+      for (const raw of statements) {
+        const statement = raw instanceof ExportStmt && raw.declaration ? raw.declaration : raw;
         if (statement instanceof VarStmt) {
           this.topLevelVars.add(statement.name.lexeme);
           if (statement.isConst) this.topLevelConsts.add(statement.name.lexeme);
         }
         if (statement instanceof FunctionStmt) {
-          this.declareVariable(statement.name);
-          this.environment.defineFunction(statement.name, statement);
+          if (this.topLevelVars.has(statement.name.lexeme)) {
+            throw new SemanticError(statement.name, "Variable with this name already declared in this scope.");
+          }
+          this.declareFunction(statement.name, statement);
           this.hoisted.add(statement);
         }
       }
+      this.analyzeStatements(statements);
+    }
+
+    private analyzeStatements(statements: Stmt[]): void {
+      let terminated = false;
       for (const statement of statements) {
+        if (terminated) {
+          throw new SemanticError(this.statementToken(statement), "Unreachable code.");
+        }
         this.analyzeStmt(statement);
+        if (this.statementTerminates(statement)) {
+          terminated = true;
+        }
       }
+    }
+
+    private statementTerminates(stmt: Stmt): boolean {
+      if (stmt instanceof ReturnStmt || stmt instanceof BreakStmtClass) {
+        return true;
+      }
+      if (stmt instanceof BlockStmt) {
+        for (const s of stmt.statements) {
+          if (this.statementTerminates(s)) return true;
+        }
+        return false;
+      }
+      if (stmt instanceof IfStmt) {
+        return stmt.elseBranch !== null
+          && this.statementTerminates(stmt.thenBranch)
+          && this.statementTerminates(stmt.elseBranch);
+      }
+      if (stmt instanceof TryCatchStmt) {
+        return stmt.tryBlock.some((s) => this.statementTerminates(s))
+          && stmt.catchBlock.some((s) => this.statementTerminates(s));
+      }
+      return false;
+    }
+
+    private statementToken(stmt: Stmt): Token {
+      const line = (stmt as any).line ?? 0;
+      if (stmt instanceof VarStmt || stmt instanceof FunctionStmt) return stmt.name;
+      if (stmt instanceof ReturnStmt || stmt instanceof BreakStmtClass) return stmt.keyword;
+      if (stmt instanceof ForOfStmtClass) return stmt.name;
+      if (stmt instanceof PrintStmt) return { type: TokenType.PRINT, lexeme: "print", literal: null, line };
+      if (stmt instanceof IfStmt) return { type: TokenType.IF, lexeme: "if", literal: null, line };
+      if (stmt instanceof WhileStmt) return { type: TokenType.WHILE, lexeme: "while", literal: null, line };
+      if (stmt instanceof ForStmtClass) return { type: TokenType.FOR, lexeme: "for", literal: null, line };
+      if (stmt instanceof TryCatchStmt) return { type: TokenType.TRY, lexeme: "try", literal: null, line };
+      if (stmt instanceof BlockStmt) {
+        return stmt.statements.length > 0
+          ? this.statementToken(stmt.statements[0])
+          : { type: TokenType.LEFT_BRACE, lexeme: "{", literal: null, line };
+      }
+      if (stmt instanceof ExpressionStmt) {
+        const e: any = stmt.expression;
+        if (e?.name) return e.name;
+        if (e?.operator) return e.operator;
+        if (e?.paren) return e.paren;
+        if (e?.equals) return e.equals;
+        if (e?.token) return e.token;
+        if (e?.keyword) return e.keyword;
+      }
+      return { type: TokenType.SEMICOLON, lexeme: "", literal: null, line };
     }
   
     private analyzeStmt(stmt: Stmt): void {
@@ -80,9 +152,7 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
   
     visitBlockStmt(stmt: BlockStmt): void {
       this.beginScope();
-      for (const statement of stmt.statements) {
-        this.analyzeStmt(statement);
-      }
+      this.analyzeStatements(stmt.statements);
       this.endScope();
     }
   
@@ -138,18 +208,44 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       throw new SemanticError(expr.equals, "Invalid assignment target: it must start with a variable.");
     }
     this.checkAssignable(node.name);
-    // Nested or compound targets read their keys more than once; keys must not have side effects.
-    const compound = expr.value instanceof Binary && expr.value.left === expr.target;
-    if (keys.length > 1 || compound) {
-      for (const key of keys) {
-        if (!(key instanceof Literal) && !(key instanceof Variable)) {
-          throw new SemanticError(expr.equals, "In a nested or compound element assignment, each index must be a literal or a variable.");
-        }
-      }
-    }
     this.statementLevel = null;
     this.analyzeExpr(expr.target);
     this.analyzeExpr(expr.value);
+  }
+
+  visitTernaryExpr(expr: TernaryExpr): void {
+    this.analyzeExpr(expr.condition);
+    this.analyzeExpr(expr.thenBranch);
+    this.analyzeExpr(expr.elseBranch);
+  }
+
+  visitTemplateLiteralExpr(expr: TemplateLiteralExpr): void {
+    for (const part of expr.parts) {
+      this.analyzeExpr(part);
+    }
+  }
+
+  visitFunctionExpr(expr: FunctionExpr): void {
+    const hasOuterSelf = expr.name !== null;
+    if (hasOuterSelf) {
+      this.beginScope();
+      this.declareVariable(expr.name!, true);
+    }
+    this.beginScope();
+    for (const param of expr.params) {
+      this.declareVariable(param);
+    }
+    const enclosingFunction = this.currentFunction;
+    const enclosingLoops = this.loopDepth;
+    this.currentFunction = FunctionType.FUNCTION;
+    this.loopDepth = 0;
+    this.analyzeStatements(expr.body);
+    this.currentFunction = enclosingFunction;
+    this.loopDepth = enclosingLoops;
+    this.endScope();
+    if (hasOuterSelf) {
+      this.endScope();
+    }
   }
 
   visitBreakStmt(stmt: BreakStmt): void {
@@ -170,8 +266,7 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
 
   visitFunctionStmt(stmt: FunctionStmt): void {
       if (!this.hoisted.has(stmt)) {
-        this.declareVariable(stmt.name);
-        this.environment.defineFunction(stmt.name, stmt);
+        this.declareFunction(stmt.name, stmt);
       }
       this.beginScope();
       for (const param of stmt.params) {
@@ -181,9 +276,7 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       const enclosingLoops = this.loopDepth;
       this.currentFunction = FunctionType.FUNCTION;
       this.loopDepth = 0;
-      for (const bodyStmt of stmt.body) {
-        this.analyzeStmt(bodyStmt);
-      }
+      this.analyzeStatements(stmt.body);
       this.currentFunction = enclosingFunction;
       this.loopDepth = enclosingLoops;
       this.endScope();
@@ -276,6 +369,13 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       }
       const arity = arityError(host, expr.arguments.length);
       if (arity) throw new SemanticError(expr.paren, arity);
+      if (host.deprecated) {
+        this.warnings.push({
+          line: name.line,
+          column: name.column,
+          message: `${host.name} is deprecated: ${host.deprecated}`,
+        });
+      }
     }
 
     visitGroupingExpr(expr: Grouping): void {
@@ -309,18 +409,14 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
 
     visitTryCatchStmt(stmt: TryCatchStmt): void {
       this.beginScope();
-      for (const s of stmt.tryBlock) {
-        this.analyzeStmt(s);
-      }
+      this.analyzeStatements(stmt.tryBlock);
       this.endScope();
       this.beginScope();
       if (stmt.catchParam !== null) {
         const tok = { type: TokenType.IDENTIFIER, lexeme: stmt.catchParam, literal: null, line: 0 } as Token;
         this.declareVariable(tok);
       }
-      for (const s of stmt.catchBlock) {
-        this.analyzeStmt(s);
-      }
+      this.analyzeStatements(stmt.catchBlock);
       this.endScope();
     }
 
@@ -330,12 +426,41 @@ export class SemanticAnalyzer implements ExprVisitor<void>, StmtVisitor<void> {
       }
       this.environment.define(name, isConst ? CONST_MARK : null);
     }
+
+    private declareFunction(name: Token, stmt: FunctionStmt): void {
+      if (this.environment.existsInCurrentScope(name)) {
+        throw new SemanticError(name, "Variable with this name already declared in this scope.");
+      }
+      this.environment.defineFunction(name, stmt);
+    }
   
+    visitImportStmt(stmt: ImportStmt): void {
+      throw new SemanticError(stmt.keyword, "Imports must be resolved by the module linker before compilation.");
+    }
+
+    visitExportStmt(stmt: ExportStmt): void {
+      if (this.currentFunction !== FunctionType.NONE || this.blockDepth > 0) {
+        throw new SemanticError(stmt.keyword, "'export' is only allowed at the top level.");
+      }
+      if (stmt.declaration) {
+        this.analyzeStmt(stmt.declaration);
+      }
+      if (stmt.specifiers) {
+        for (const spec of stmt.specifiers) {
+          if (!this.environment.isDefined(spec.local)) {
+            throw new SemanticError(spec.local, `Undefined exported symbol '${spec.local.lexeme}'.`);
+          }
+        }
+      }
+    }
+
     private beginScope(): void {
+      this.blockDepth++;
       this.environment = new Environment(this.environment);
     }
   
     private endScope(): void {
+      this.blockDepth--;
       this.environment = this.environment.enclosing!;
     }
   }

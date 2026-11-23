@@ -1,0 +1,5 @@
+try { arraySort([1, "a"]); } catch (e) { print(e.kind); }
+try { arraySort([{a: 1}]); } catch (e) { print(e.kind); }
+try { arraySort([1, 2], function(x) { return x; }); } catch (e) { print(e.kind); }
+try { arraySort([1, 2], function(x, y) { return "bad"; }); } catch (e) { print(e.kind); }
+

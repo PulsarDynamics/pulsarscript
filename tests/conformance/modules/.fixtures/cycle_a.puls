@@ -1,0 +1,2 @@
+import { b } from "./cycle_b.puls";
+export var a = b + 1;

@@ -1,0 +1,8 @@
+var s = "bananas";
+print(indexOf(s, "na"));
+print(indexOf(s, "na", 3));
+print(indexOf(s, "na", -5));
+print(indexOf(s, "na", 10));
+print(indexOf(s, "", 3));
+print(indexOf("a😀b😀c", "😀", 2));
+

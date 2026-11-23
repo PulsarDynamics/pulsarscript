@@ -1,0 +1,6 @@
+print(split("a,b,,c", ","));
+print(split("", ","));
+print(split("", ""));
+print(split("a😀b", ""));
+print(split("foobar", "oo"));
+

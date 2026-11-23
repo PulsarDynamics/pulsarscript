@@ -1,0 +1,7 @@
+var fns = [];
+for (var x of [1, 2, 3]) {
+  fns[len(fns)] = function() { return x; };
+  if (x == 2) continue;
+  fns[len(fns)] = function() { return x * 10; };
+}
+for (var fn of fns) print(fn());

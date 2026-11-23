@@ -1,0 +1,22 @@
+// Code-point lexicographic string comparison (<, <=, >, >=).
+print("a" < "b");
+print("a" <= "a");
+print("a" < "a");
+print("b" > "a");
+print("b" >= "b");
+print("apple" < "application");
+print("A" < "a");
+print("" < "😀");
+
+// Sort filenames with insertion sort using <.
+var files = ["notes.md", "b.txt", "a2.txt", "README.md", "a10.txt"];
+for (var i = 1; i < len(files); i += 1) {
+  var j = i;
+  while (j > 0 && files[j] < files[j - 1]) {
+    var tmp = files[j - 1];
+    files[j - 1] = files[j];
+    files[j] = tmp;
+    j -= 1;
+  }
+}
+print(files);

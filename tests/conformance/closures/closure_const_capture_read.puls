@@ -1,0 +1,5 @@
+function make() {
+  const c = 42;
+  return function() { return c; };
+}
+print(make()());

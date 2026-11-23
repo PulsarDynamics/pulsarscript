@@ -1,0 +1,8 @@
+var v = {arr: [1, true, nil, "hi"], n: -42.5, empty: {}};
+var txt = jsonStringify(v);
+print(txt);
+var back = jsonParse(txt);
+print(back == v);
+print(jsonParse("null"));
+print(jsonStringify(-0));
+

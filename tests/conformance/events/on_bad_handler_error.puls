@@ -1,0 +1,7 @@
+try {
+  var notFn = 123;
+  on("evt", notFn);
+} catch (e) {
+  print(e.kind);
+}
+

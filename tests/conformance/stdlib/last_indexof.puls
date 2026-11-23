@@ -1,0 +1,9 @@
+var s = "hello";
+print(lastIndexOf(s, "l"));
+print(lastIndexOf(s, "l", 2));
+print(lastIndexOf(s, "o", 1));
+print(lastIndexOf(s, "", 2));
+print(lastIndexOf(s, "", 99));
+print(lastIndexOf("a😀b😀", "😀"));
+print(lastIndexOf("a😀b😀", "😀", 2));
+

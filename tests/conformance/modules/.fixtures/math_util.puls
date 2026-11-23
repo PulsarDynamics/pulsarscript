@@ -1,0 +1,21 @@
+export const VERSION = 3;
+export var counter = 0;
+
+export function add(a, b) {
+  return a + b;
+}
+
+export function bumpCounter(n) {
+  counter = counter + n;
+  return counter;
+}
+
+function hiddenHelper(x) {
+  return x * 10;
+}
+
+function secretAdd(a, b) {
+  return hiddenHelper(a) + b;
+}
+
+export { secretAdd as pubWeighted, bumpCounter as inc };

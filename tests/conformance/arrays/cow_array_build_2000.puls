@@ -1,0 +1,12 @@
+// Building a 2,000-element array via a[len(a)] = i inside a function (CoW + no SET_LOCAL stack leak).
+function build(n) {
+  var a = [];
+  for (var i = 0; i < n; i += 1) {
+    a[len(a)] = i;
+  }
+  return a;
+}
+var res = build(2000);
+print(len(res));
+print(res[0]);
+print(res[1999]);

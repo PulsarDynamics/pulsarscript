@@ -1,0 +1,2 @@
+import { getVal, inits } from "./diamond_shared.puls";
+export function rightRead() { return [inits, getVal() + 2]; }

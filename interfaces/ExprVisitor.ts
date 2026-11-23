@@ -10,6 +10,9 @@ import type { Unary } from "../classes/Unary";
 import type { Variable } from "../classes/Variable";
 import type { ArrayExpr } from "../classes/ArrayExpr";
 import type { ObjectExpr } from "../classes/ObjectExpr";
+import type { TernaryExpr } from "../classes/TernaryExpr";
+import type { TemplateLiteralExpr } from "../classes/TemplateLiteralExpr";
+import type { FunctionExpr } from "../classes/FunctionExpr";
 
 export interface ExprVisitor<R> {
   visitBinaryExpr(expr: Binary): R;
@@ -24,4 +27,7 @@ export interface ExprVisitor<R> {
   visitObjectExpr(expr: ObjectExpr): R;
   visitIndexExpr(expr: IndexExpr): R;
   visitSetIndexExpr(expr: SetIndex): R;
+  visitTernaryExpr(expr: TernaryExpr): R;
+  visitTemplateLiteralExpr(expr: TemplateLiteralExpr): R;
+  visitFunctionExpr(expr: FunctionExpr): R;
 }

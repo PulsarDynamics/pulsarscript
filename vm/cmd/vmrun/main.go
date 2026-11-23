@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +23,10 @@ var (
 	seed        = flag.Int64("seed", 0, "Random seed for deterministic execution (0 = non-deterministic)")
 	maxSteps    = flag.Int("max-steps", pulsarscriptvm.DefaultMaxSteps, "Instruction budget; 0 = unlimited")
 	timeout     = flag.Duration("timeout", pulsarscriptvm.DefaultMaxDuration, "Wall-time budget; 0 = unlimited")
+	maxString   = flag.Int("max-string", pulsarscriptvm.DefaultMaxStringBytes, "Max bytes per string; 0 = unlimited")
+	maxElements = flag.Int("max-elements", pulsarscriptvm.DefaultMaxCollectionLen, "Max elements per array or object; 0 = unlimited")
+	maxMemory   = flag.Int64("max-memory", pulsarscriptvm.DefaultMaxMemoryBytes, "Max estimated live VM memory in bytes; 0 = unlimited")
+	maxHeap     = flag.Int("max-heap", pulsarscriptvm.DefaultMaxHeapCount, "Max live heap objects; 0 = unlimited")
 )
 
 func main() {
@@ -72,9 +77,13 @@ func main() {
 		return n
 	}
 	config := pulsarscriptvm.VMConfig{
-		MaxStackDepth: *maxStack,
-		MaxSteps:      int(unlimitedIfZero(int64(*maxSteps))),
-		MaxDuration:   time.Duration(unlimitedIfZero(int64(*timeout))),
+		MaxStackDepth:    *maxStack,
+		MaxHeapCount:     int(unlimitedIfZero(int64(*maxHeap))),
+		MaxStringBytes:   int(unlimitedIfZero(int64(*maxString))),
+		MaxCollectionLen: int(unlimitedIfZero(int64(*maxElements))),
+		MaxMemoryBytes:   unlimitedIfZero(*maxMemory),
+		MaxSteps:         int(unlimitedIfZero(int64(*maxSteps))),
+		MaxDuration:      time.Duration(unlimitedIfZero(int64(*timeout))),
 	}
 
 	callbacks := pulsarscriptvm.HostCallbacks{
@@ -110,8 +119,19 @@ func main() {
 		return
 	}
 
-	// Normal execution
-	if err := vm.Run(); err != nil {
+	// Normal execution (auto-resumes yield/sleep so scripts complete end-to-end)
+	for {
+		err := vm.Run()
+		if err == nil {
+			break
+		}
+		if errors.Is(err, pulsarscriptvm.ErrYielded) {
+			if d := vm.SleepRemaining(); d > 0 {
+				time.Sleep(d)
+			}
+			vm.Resume()
+			continue
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

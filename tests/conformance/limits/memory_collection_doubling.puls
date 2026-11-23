@@ -1,0 +1,12 @@
+// Growing an array past 1,000,000 elements stops cleanly with an uncatchable memory limit error (LANG-01).
+// Build via arrayConcat doubling so it trips well before the step budget!
+var a = [1, 2, 3, 4];
+try {
+  for (var i = 0; i < 25; i += 1) {
+    a = arrayConcat(a, a);
+  }
+  print("completed");
+} catch (e) {
+  print("caught");
+}
+print("unreachable");

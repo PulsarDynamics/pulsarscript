@@ -23,9 +23,25 @@ export function formatNumber(n: number): string {
   return Object.is(n, -0) ? "0" : String(n);
 }
 
-/** Keys in a fixed order (code-unit order), so printing and objKeys are deterministic. */
+/** Lexicographic Unicode code-point comparison matching Go UTF-8 string order. */
+export function compareStringsByCodePoint(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const ca = a.codePointAt(i)!;
+    const cb = b.codePointAt(j)!;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    i += ca > 0xffff ? 2 : 1;
+    j += cb > 0xffff ? 2 : 1;
+  }
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
+}
+
+/** Keys in sorted code-point order, matching the Go VM's sortedKeys(). */
 export function sortedKeys(o: PulsarObject): string[] {
-  return [...o.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...o.keys()].sort(compareStringsByCodePoint);
 }
 
 function quote(s: string): string {

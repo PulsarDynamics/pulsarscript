@@ -18,6 +18,7 @@ export interface HostFunction {
   name: string;
   provider: "core" | "host";
   capability?: string;
+  deprecated?: string;
   params: HostParam[];
   returns: string;
   doc: string;

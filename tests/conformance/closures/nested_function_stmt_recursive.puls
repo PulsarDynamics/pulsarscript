@@ -1,0 +1,8 @@
+function compute(n) {
+  function fib(k) {
+    if (k <= 1) return k;
+    return fib(k - 1) + fib(k - 2);
+  }
+  return fib(n);
+}
+print(compute(7));

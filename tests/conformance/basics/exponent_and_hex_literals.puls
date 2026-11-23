@@ -1,0 +1,7 @@
+// Scientific notation and hex numeric literals (LANG-18, A22).
+print(1e3);
+print(1.5e-2);
+print(2E+3);
+print(0xff);
+print(0x1A + 4);
+print(0x0);

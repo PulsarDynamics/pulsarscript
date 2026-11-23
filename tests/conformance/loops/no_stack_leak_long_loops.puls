@@ -1,0 +1,10 @@
+// 2,000-iteration brace-less for loop and 1,500-element for...of must not overflow the VM stack.
+var sum = 0;
+for (var i = 0; i < 2000; i = i + 1) sum = sum + 1;
+print(sum);
+
+var a = [];
+for (var j = 0; j < 1500; j += 1) a[len(a)] = j;
+var total = 0;
+for (var x of a) total += 1;
+print(total);

@@ -1,0 +1,5 @@
+var src = [1, 2, 3, 4, 5, 6];
+var evens = arrayFilter(src, function(x) { return x % 2 == 0; });
+print(evens);
+print(arrayFilter([], function(x) { return true; }));
+

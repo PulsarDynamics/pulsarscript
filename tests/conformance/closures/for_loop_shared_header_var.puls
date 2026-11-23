@@ -1,0 +1,5 @@
+var fns = [];
+for (var i = 0; i < 3; i = i + 1) {
+  fns[len(fns)] = function() { return i; };
+}
+for (var fn of fns) print(fn());

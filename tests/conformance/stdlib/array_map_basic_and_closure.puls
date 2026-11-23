@@ -1,0 +1,6 @@
+var factor = 10;
+var src = [1, 2, 3];
+var out = arrayMap(src, function(x) { return x * factor; });
+print(src);
+print(out);
+

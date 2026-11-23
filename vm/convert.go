@@ -22,15 +22,18 @@ func ToInterface(v Value) interface{} {
 	case kindString:
 		return v.str
 	case kindArray:
-		out := make([]interface{}, len(v.arr))
-		for i, e := range v.arr {
-			out[i] = ToInterface(e)
+		n := v.arrayLen()
+		out := make([]interface{}, n)
+		for i := 0; i < n; i++ {
+			out[i] = ToInterface(v.arrayAt(i))
 		}
 		return out
 	case kindObject:
-		out := make(map[string]interface{}, len(v.obj))
-		for k, e := range v.obj {
-			out[k] = ToInterface(e)
+		keys := v.objectKeys()
+		out := make(map[string]interface{}, len(keys))
+		for _, k := range keys {
+			val, _ := v.objectGet(k)
+			out[k] = ToInterface(val)
 		}
 		return out
 	default:

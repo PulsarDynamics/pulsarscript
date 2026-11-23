@@ -1,0 +1,2 @@
+print(arraySort(["b", "😀", "a", "￿"]));
+

@@ -16,7 +16,8 @@ export class ErrorReporter {
     const parts: string[] = [];
     
     // Header
-    parts.push(token.line > 0 ? `\n${errorType} Error at line ${token.line}:` : `\n${errorType} Error:`);
+    const colInfo = token.column && token.column > 0 ? `, col ${token.column}` : '';
+    parts.push(token.line > 0 ? `\n${errorType} Error at line ${token.line}${colInfo}:` : `\n${errorType} Error:`);
     parts.push(message);
     parts.push('');
     
@@ -34,7 +35,9 @@ export class ErrorReporter {
       parts.push(`> ${String(token.line).padStart(4, ' ')} | ${errorLine}`);
       
       // Calculate the column position for the caret
-      const column = this.findColumnInLine(errorLine, token.lexeme);
+      const column = token.column && token.column > 0
+        ? token.column - 1
+        : this.findColumnInLine(errorLine, token.lexeme);
       if (column >= 0) {
         // Add caret indicator
         const padding = ' '.repeat(8 + column); // 8 = "  #### | ".length
@@ -114,6 +117,8 @@ export class ErrorReporter {
 export interface CallFrame {
   functionName: string;
   line: number;
+  callLine?: number;
+  callFile?: string;
 }
 
 /**

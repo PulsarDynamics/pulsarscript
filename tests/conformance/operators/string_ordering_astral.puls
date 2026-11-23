@@ -1,0 +1,3 @@
+// Code-point string comparison matches Go UTF-8 order even across BMP high planes vs astral plane.
+print("" < "😀");
+print("😀" > "");

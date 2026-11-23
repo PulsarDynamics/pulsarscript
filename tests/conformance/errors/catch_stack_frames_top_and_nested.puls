@@ -1,0 +1,19 @@
+function inner() {
+  var fail = 1 / 0;
+  return fail;
+}
+function outer() {
+  var fn = function() { return inner(); };
+  return fn();
+}
+try {
+  outer();
+} catch (e) {
+  print(e.kind);
+  print(len(e.stack) >= 3);
+  var joined = "";
+  for (var frame of e.stack) joined = joined + frame + "|";
+  print(indexOf(joined, "inner") >= 0);
+  print(indexOf(joined, "outer") >= 0);
+  print(indexOf(joined, "<script>") >= 0);
+}

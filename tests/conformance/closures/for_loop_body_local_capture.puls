@@ -1,0 +1,6 @@
+var fns = [];
+for (var i = 0; i < 3; i = i + 1) {
+  var v = i * 10;
+  fns[len(fns)] = function() { return v; };
+}
+for (var fn of fns) print(fn());

@@ -14,11 +14,17 @@ export enum TokenType {
     BREAK = "BREAK",
     CONTINUE = "CONTINUE",
     CONST = "CONST",
+    IMPORT = "IMPORT",
+    EXPORT = "EXPORT",
 
     // Literals
     IDENTIFIER = 'IDENTIFIER',
     NUMBER = 'NUMBER',
     STRING = 'STRING',
+    TEMPLATE_STRING = 'TEMPLATE_STRING',
+    TEMPLATE_HEAD = 'TEMPLATE_HEAD',
+    TEMPLATE_MIDDLE = 'TEMPLATE_MIDDLE',
+    TEMPLATE_TAIL = 'TEMPLATE_TAIL',
 
     // Logic
     FALSE = "FALSE",
@@ -57,6 +63,7 @@ export enum TokenType {
     DOT = 'DOT',
     COLON = 'COLON',
     SEMICOLON = 'SEMICOLON',
+    QUESTION = 'QUESTION',
 
     // Other
     EOF = 'EOF'
