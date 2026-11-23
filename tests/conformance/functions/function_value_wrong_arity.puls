@@ -1,0 +1,4 @@
+// Arity is checked when a function value is called.
+function two(a, b) { return a + b; }
+var f = two;
+print(f(1));

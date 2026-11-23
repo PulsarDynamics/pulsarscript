@@ -18,6 +18,10 @@ import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr, type ObjectProperty } from "./classes/ObjectExpr";
 import { TokenType } from "./enums/TokenType";
+import { IndexExpr } from "./classes/IndexExpr";
+import { SetIndex } from "./classes/SetIndex";
+import { BreakStmt } from "./classes/BreakStmt";
+import { ForOfStmt } from "./classes/ForOfStmt";
 import type { Expr } from "./interfaces/Expr";
 import type { Stmt } from "./interfaces/Stmt";
 import type { Token } from "./interfaces/Token";
@@ -62,6 +66,7 @@ export class Parser {
         const line = this.peek().line;
         try {
             if (this.match(TokenType.VAR)) return this.withLine(line, this.varDeclaration());
+            if (this.match(TokenType.CONST)) return this.withLine(line, this.varDeclaration(true));
             if (this.match(TokenType.FUNCTION)) return this.withLine(line, this.function("function"));
             return this.statement();
         } catch (error) {
@@ -70,7 +75,7 @@ export class Parser {
         }
     }
 
-    private varDeclaration(): Stmt {
+    private varDeclaration(isConst = false): Stmt {
         const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
         //console.log("name", name)
         let initializer: Expr | null = null;
@@ -79,8 +84,11 @@ export class Parser {
             //console.log("initializer", initializer)
         }
 
+        if (isConst && initializer === null) {
+            this.error(name, `Constant '${name.lexeme}' must be initialised.`);
+        }
         this.consume(TokenType.SEMICOLON, "Expect ';' after variable declaration.");
-        return new VarStmt(name, initializer);
+        return new VarStmt(name, initializer, isConst);
     }
 
     private function(kind: string): FunctionStmt {
@@ -115,6 +123,11 @@ export class Parser {
         if (this.match(TokenType.LEFT_BRACE)) return new BlockStmt(this.block());
         if (this.match(TokenType.RETURN)) return this.returnStatement();
         if (this.match(TokenType.TRY)) return this.tryCatchStatement();
+        if (this.match(TokenType.BREAK, TokenType.CONTINUE)) {
+            const keyword = this.previous();
+            this.consume(TokenType.SEMICOLON, `Expect ';' after '${keyword.lexeme}'.`);
+            return new BreakStmt(keyword, keyword.type === TokenType.CONTINUE);
+        }
 
         return this.expressionStatement();
     }
@@ -150,6 +163,20 @@ export class Parser {
 
     private forStatement(): Stmt {
         this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.");
+
+        // for (var x of items) / for (const x of items)
+        if ((this.check(TokenType.VAR) || this.check(TokenType.CONST)) && this.peekAt(1).type === TokenType.IDENTIFIER
+            && this.peekAt(2).type === TokenType.IDENTIFIER && this.peekAt(2).lexeme === "of") {
+            const isConst = this.advance().type === TokenType.CONST;
+            const name = this.advance();
+            this.advance(); // of
+            const iterable = this.expression();
+            this.consume(TokenType.RIGHT_PAREN, "Expect ')' after for-of clause.");
+            const body = this.statement();
+            const stmt = new ForOfStmt(name, isConst, iterable, body);
+            stmt.line = name.line;
+            return stmt;
+        }
 
         let initializer: Stmt | null = null;
         if (this.match(TokenType.SEMICOLON)) {
@@ -238,13 +265,29 @@ export class Parser {
     private assignment(): Expr {
         const expr = this.or();
 
-        if (this.match(TokenType.EQUAL)) {
+        if (this.match(TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL)
+            || this.match(TokenType.STAR_EQUAL, TokenType.SLASH_EQUAL, TokenType.PERCENT_EQUAL)) {
             const equals = this.previous();
-            const value = this.assignment();
+            let value = this.assignment();
+
+            // `x op= e` is `x = x op e`; the target is evaluated as written (SPEC 4.4).
+            if (equals.type !== TokenType.EQUAL) {
+                const opType = {
+                    [TokenType.PLUS_EQUAL]: TokenType.PLUS,
+                    [TokenType.MINUS_EQUAL]: TokenType.MINUS,
+                    [TokenType.STAR_EQUAL]: TokenType.STAR,
+                    [TokenType.SLASH_EQUAL]: TokenType.SLASH,
+                    [TokenType.PERCENT_EQUAL]: TokenType.PERCENT,
+                }[equals.type as string] as TokenType;
+                const operator: Token = { ...equals, type: opType, lexeme: equals.lexeme.slice(0, -1) };
+                value = new Binary(expr, operator, value);
+            }
 
             if (expr instanceof Variable) {
-                const name = expr.name;
-                return new Assign(name, value);
+                return new Assign(expr.name, value);
+            }
+            if (expr instanceof IndexExpr) {
+                return new SetIndex(expr, value, equals);
             }
 
             this.error(equals, "Invalid assignment target.");
@@ -316,7 +359,7 @@ export class Parser {
     private factor(): Expr {
         let expr = this.unary();
 
-        while (this.match(TokenType.SLASH, TokenType.STAR)) {
+        while (this.match(TokenType.SLASH, TokenType.STAR, TokenType.PERCENT)) {
             const operator = this.previous();
             const right = this.unary();
             expr = new Binary(expr, operator, right);
@@ -341,6 +384,16 @@ export class Parser {
         while (true) {
             if (this.match(TokenType.LEFT_PAREN)) {
                 expr = this.finishCall(expr);
+            } else if (this.match(TokenType.LEFT_BRACKET)) {
+                const bracket = this.previous();
+                const index = this.expression();
+                this.consume(TokenType.RIGHT_BRACKET, "Expect ']' after index.");
+                expr = new IndexExpr(expr, index, bracket, false);
+            } else if (this.match(TokenType.DOT)) {
+                const dot = this.previous();
+                const name = this.consume(TokenType.IDENTIFIER, "Expect property name after '.'.");
+                const key = this.withLine(name.line, new Literal(name.lexeme));
+                expr = new IndexExpr(expr, key, dot, true);
             } else {
                 break;
             }
@@ -477,6 +530,12 @@ export class Parser {
 
     private peek(): Token {
         return this.tokens[this.current];
+    }
+
+    /** The token `offset` places ahead of the current one (EOF past the end). */
+    private peekAt(offset: number): Token {
+        const i = this.current + offset;
+        return i < this.tokens.length ? this.tokens[i] : this.tokens[this.tokens.length - 1];
     }
 
     private previous(): Token {

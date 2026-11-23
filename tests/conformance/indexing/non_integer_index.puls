@@ -1,0 +1,3 @@
+// Array indexes must be integers.
+var a = [1, 2];
+print(a[0.5]);

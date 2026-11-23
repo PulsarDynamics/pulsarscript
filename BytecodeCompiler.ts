@@ -24,6 +24,30 @@ import { TryCatchStmt } from "./classes/TryCatchStmt";
 import { ArrayExpr } from "./classes/ArrayExpr";
 import { ObjectExpr } from "./classes/ObjectExpr";
 import type { FunctionEntry } from "./Bytecode";
+import { IndexExpr } from "./classes/IndexExpr";
+import type { SetIndex } from "./classes/SetIndex";
+import type { BreakStmt } from "./classes/BreakStmt";
+import type { ForOfStmt } from "./classes/ForOfStmt";
+
+/** A `break` or `continue` waiting for its loop to finish compiling. */
+interface PendingJump {
+  /** Position of the EXIT_BLOCK whose operand is the size of the blocks it leaves. */
+  exitPos: number;
+  /** ENTER_BLOCK positions of the blocks it leaves, patched once they close. */
+  blocks: number[];
+  /** Position of the JUMP to patch (forward jumps only). */
+  jumpPos: number;
+}
+
+interface LoopContext {
+  breaks: PendingJump[];
+  continues: PendingJump[];
+  /** Where `continue` jumps; null while it is not known yet (for and for-of increments). */
+  continueTarget: number | null;
+  /** openBlocks.length and tryDepth when the loop body starts. */
+  blockDepth: number;
+  tryDepth: number;
+}
 
 /**
  * Very small bytecode compiler that covers literals, unary/binary ops, and print/expr statements.
@@ -46,6 +70,10 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   functionDepth = 0;
   tryDepth = 0;
   currentLine = 1; // Track current source line for error mapping
+  /** Loops being compiled in the current function, innermost last. */
+  loops: LoopContext[] = [];
+  /** ENTER_BLOCK positions of the blocks open at the current point, innermost last. */
+  openBlocks: number[] = [];
 
   static compile(statements: Stmt[]): Chunk {
     const compiler = new BytecodeCompiler();
@@ -151,6 +179,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const startLocal = this.nextLocal;
     this.beginScope();
     const enterPos = this.emitPlaceholder(Opcode.ENTER_BLOCK);
+    this.openBlocks.push(enterPos);
     const statements = stmt.statements ?? [];
     for (const s of statements) {
       this.compileNode(s);
@@ -158,7 +187,141 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const newLocals = this.nextLocal - startLocal;
     this.patchOperand(enterPos, newLocals);
     this.emit(Opcode.EXIT_BLOCK, newLocals);
+    this.openBlocks.pop();
     this.endScope(startLocal);
+  }
+
+  private beginLoop(continueTarget: number | null): LoopContext {
+    const ctx: LoopContext = {
+      breaks: [], continues: [], continueTarget,
+      blockDepth: this.openBlocks.length, tryDepth: this.tryDepth,
+    };
+    this.loops.push(ctx);
+    return ctx;
+  }
+
+  /** Patches pending jumps: EXIT_BLOCK sizes (the blocks have closed) and forward targets. */
+  private patchPending(jumps: PendingJump[], target: number) {
+    for (const j of jumps) {
+      const size = j.blocks.reduce((n, pos) => n + this.chunk.code[pos + 1], 0);
+      this.patchOperand(j.exitPos, size);
+      if (j.jumpPos >= 0) {
+        this.chunk.code[j.jumpPos + 1] = target - (j.jumpPos + 2);
+      }
+    }
+  }
+
+  visitBreakStmt(stmt: BreakStmt): void {
+    const ctx = this.loops[this.loops.length - 1];
+    if (!ctx) throw new SemanticError(stmt.keyword, `'${stmt.keyword.lexeme}' must be inside a loop.`);
+    // Leave every try block and block opened inside the loop body, then jump.
+    for (let i = ctx.tryDepth; i < this.tryDepth; i++) this.emit(Opcode.TRY_POP);
+    const pending: PendingJump = {
+      exitPos: this.emitPlaceholder(Opcode.EXIT_BLOCK),
+      blocks: this.openBlocks.slice(ctx.blockDepth),
+      jumpPos: -1,
+    };
+    if (stmt.isContinue && ctx.continueTarget !== null) {
+      this.emitJump(ctx.continueTarget);
+      ctx.continues.push(pending);
+    } else {
+      pending.jumpPos = this.emitPlaceholder(Opcode.JUMP);
+      (stmt.isContinue ? ctx.continues : ctx.breaks).push(pending);
+    }
+  }
+
+  visitForOfStmt(stmt: ForOfStmt): void {
+    // { items = ITER_ITEMS(iterable); i = 0; x;
+    //   loop: if (!(i < arrayLen(items))) goto exit; x = items[i]; body; continue: i = i + 1; goto loop
+    //   exit: }
+    const startLocal = this.nextLocal;
+    this.beginScope();
+    const enterPos = this.emitPlaceholder(Opcode.ENTER_BLOCK);
+    this.openBlocks.push(enterPos);
+    this.compileNode(stmt.iterable);
+    this.emit(Opcode.ITER_ITEMS);
+    const items = this.declareLocal("@items"); // names no source identifier can take
+    this.emit(Opcode.SET_LOCAL, items);
+    const index = this.declareLocal("@index");
+    this.emit(Opcode.CONST, this.addConstant(0));
+    this.emit(Opcode.SET_LOCAL, index);
+    const item = this.declareLocal(stmt.name.lexeme);
+
+    const loopStart = this.chunk.code.length;
+    this.emit(Opcode.GET_LOCAL, index);
+    this.emit(Opcode.GET_LOCAL, items);
+    this.emit(Opcode.HOST_CALL, this.addConstant("arrayLen"));
+    this.emit(1);
+    this.emit(Opcode.LESS);
+    const exitJump = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
+    this.emit(Opcode.GET_LOCAL, items);
+    this.emit(Opcode.GET_LOCAL, index);
+    this.emit(Opcode.INDEX_GET, 0);
+    this.emit(Opcode.SET_LOCAL, item);
+
+    const ctx = this.beginLoop(null);
+    this.compileNode(stmt.body);
+    this.loops.pop();
+
+    const continueAt = this.chunk.code.length;
+    this.emit(Opcode.GET_LOCAL, index);
+    this.emit(Opcode.CONST, this.addConstant(1));
+    this.emit(Opcode.ADD);
+    this.emit(Opcode.SET_LOCAL, index);
+    this.emitJump(loopStart);
+    this.patchJump(exitJump);
+    const exitAt = this.chunk.code.length;
+
+    const newLocals = this.nextLocal - startLocal;
+    this.patchOperand(enterPos, newLocals);
+    this.emit(Opcode.EXIT_BLOCK, newLocals);
+    this.openBlocks.pop();
+    this.endScope(startLocal);
+    this.patchPending(ctx.continues, continueAt);
+    this.patchPending(ctx.breaks, exitAt);
+  }
+
+  visitIndexExpr(expr: IndexExpr): void {
+    this.compileNode(expr.object);
+    this.compileNode(expr.index);
+    this.emit(Opcode.INDEX_GET, expr.member ? 1 : 0);
+  }
+
+  /**
+   * `a[i][j] = v` stores a copy back into the root variable (SPEC 3.3):
+   *   a i  a i INDEX_GET  j  v INDEX_SET  INDEX_SET  SET a
+   * The analyzer allows this only as a statement, so it leaves nil for the POP that follows.
+   */
+  visitSetIndexExpr(expr: SetIndex): void {
+    this.emitStore(expr.target, () => this.compileNode(expr.value));
+    this.emit(Opcode.CONST, this.addConstant(null));
+  }
+
+  /** Stores the value `emitValue` pushes into `target` (a variable or an element of one). */
+  private emitStore(target: Expr, emitValue: () => void): void {
+    if (target instanceof Variable) {
+      emitValue();
+      const local = this.resolveLocal(target.name.lexeme);
+      if (local !== undefined) {
+        this.emit(Opcode.SET_LOCAL, local);
+      } else {
+        if (!this.globalNames.has(target.name.lexeme)) {
+          throw new SemanticError(target.name, "Cannot assign to undefined variable.");
+        }
+        this.emit(Opcode.SET_GLOBAL, this.addConstant(target.name.lexeme));
+      }
+      return;
+    }
+    if (!(target instanceof IndexExpr)) {
+      throw new Error("internal: invalid assignment target");
+    }
+    const element = target;
+    this.emitStore(element.object, () => {
+      this.compileNode(element.object);
+      this.compileNode(element.index);
+      emitValue();
+      this.emit(Opcode.INDEX_SET, element.member ? 1 : 0);
+    });
   }
   visitIfStmt(stmt: IfStmt): void {
     this.compileNode(stmt.condition);
@@ -175,15 +338,20 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     const loopStart = this.chunk.code.length;
     this.compileNode(stmt.condition);
     const exitJump = this.emitPlaceholder(Opcode.JUMP_IF_FALSE);
+    const ctx = this.beginLoop(loopStart);
     this.compileNode(stmt.body);
+    this.loops.pop();
     this.emitJump(loopStart);
     this.patchJump(exitJump);
+    this.patchPending(ctx.continues, loopStart);
+    this.patchPending(ctx.breaks, this.chunk.code.length);
   }
   visitForStmt(stmt: ForStmt): void {
     // For loops are compiled as: initializer; while(condition) { body; increment; }
     const startLocal = this.nextLocal;
     this.beginScope();
     const enterPos = this.emitPlaceholder(Opcode.ENTER_BLOCK);
+    this.openBlocks.push(enterPos);
 
     // 1. Execute initializer (if present)
     if (stmt.initializer !== null) {
@@ -199,9 +367,12 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     }
 
     // 3. Execute body
+    const ctx = this.beginLoop(null);
     this.compileNode(stmt.body);
+    this.loops.pop();
 
-    // 4. Execute increment (if present)
+    // 4. Execute increment (if present); `continue` lands here
+    const continueAt = this.chunk.code.length;
     if (stmt.increment !== null) {
       this.compileNode(stmt.increment);
       this.emit(Opcode.POP); // discard increment expression result
@@ -210,16 +381,20 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // 5. Jump back to condition check
     this.emitJump(loopStart);
 
-    // 6. Patch exit jump (if condition exists)
+    // 6. Patch exit jump (if condition exists); `break` lands here too
     if (exitJump !== -1) {
       this.patchJump(exitJump);
     }
+    const exitAt = this.chunk.code.length;
 
     // Clean up block scope
     const newLocals = this.nextLocal - startLocal;
     this.patchOperand(enterPos, newLocals);
     this.emit(Opcode.EXIT_BLOCK, newLocals);
+    this.openBlocks.pop();
     this.endScope(startLocal);
+    this.patchPending(ctx.continues, continueAt);
+    this.patchPending(ctx.breaks, exitAt);
   }
   visitFunctionStmt(stmt: FunctionStmt): void {
     // Emit jump over function body so main code skips execution.
@@ -229,8 +404,14 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Save locals state
     const prevScopes = this.scopeStack;
     const prevNextLocal = this.nextLocal;
+    const prevLoops = this.loops;
+    const prevBlocks = this.openBlocks;
+    const prevTryDepth = this.tryDepth;
     this.scopeStack = [new Map()];
     this.nextLocal = 0;
+    this.loops = [];
+    this.openBlocks = [];
+    this.tryDepth = 0;
     // Declare params as locals
     for (const p of stmt.params) {
       this.declareLocal(p.lexeme);
@@ -250,6 +431,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     // Restore locals
     this.scopeStack = prevScopes;
     this.nextLocal = prevNextLocal;
+    this.loops = prevLoops;
+    this.openBlocks = prevBlocks;
+    this.tryDepth = prevTryDepth;
     // Patch jump over function body
     this.patchJump(jumpOver);
   }
@@ -295,6 +479,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       const startLocal = this.nextLocal;
       this.beginScope();
       const enterPos = this.emitPlaceholder(Opcode.ENTER_BLOCK);
+      this.openBlocks.push(enterPos);
       const slot = this.declareLocal(stmt.catchParam);
       this.emit(Opcode.SET_LOCAL, slot); // store error from stack
       this.emit(Opcode.POP); // clean up the SET_LOCAL push
@@ -307,6 +492,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       const newLocals = this.nextLocal - startLocal;
       this.patchOperand(enterPos, newLocals);
       this.emit(Opcode.EXIT_BLOCK, newLocals);
+      this.openBlocks.pop();
       this.endScope(startLocal);
     } else {
       // No catch parameter - just pop the error from stack
@@ -370,6 +556,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
           case TokenType.SLASH:
             this.emit(Opcode.DIV);
             break;
+          case TokenType.PERCENT:
+            this.emit(Opcode.MOD);
+            break;
           default:
             switch (expr.operator.type) {
               case TokenType.EQUAL_EQUAL:
@@ -404,6 +593,17 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
       return;
     }
     if (!this.globalNames.has(expr.name.lexeme)) {
+      // A top-level function used as a value (SPEC 3.1): push a reference to it.
+      const fn = this.functions.get(expr.name.lexeme);
+      if (fn) {
+        this.emit(Opcode.FUNC, fn.address);
+        return;
+      }
+      if (this.hoisted.has(expr.name.lexeme)) {
+        this.emit(Opcode.FUNC, 0);
+        this.callFixups.push({ operandPos: this.chunk.code.length - 1, name: expr.name.lexeme });
+        return;
+      }
       throw new SemanticError(expr.name, "Variable is not defined.");
     }
     const nameIdx = this.addConstant(expr.name.lexeme);
@@ -427,8 +627,16 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     }
   }
   visitCallExpr(expr: any): void {
-    if (!(expr.callee instanceof Variable)) {
-      throw new Error("Only simple function/host calls supported in bytecode yet");
+    // A function value: from an expression, or a variable that holds one (SPEC 4.6).
+    if (!(expr.callee instanceof Variable)
+      || this.resolveLocal(expr.callee.name.lexeme) !== undefined
+      || this.globalNames.has(expr.callee.name.lexeme)) {
+      this.compileNode(expr.callee);
+      for (const arg of expr.arguments) {
+        this.compileNode(arg);
+      }
+      this.emit(Opcode.CALL_VALUE, expr.arguments.length);
+      return;
     }
     const calleeName = expr.callee.name.lexeme;
     // evaluate args

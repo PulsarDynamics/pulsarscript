@@ -1,0 +1,2 @@
+// for...of needs an array, object or string.
+for (var x of 5) { print(x); }

@@ -21,7 +21,10 @@ export class Lexer {
     'false': TokenType.FALSE,
     'nil': TokenType.NIL,
     'try': TokenType.TRY,
-    'catch': TokenType.CATCH
+    'catch': TokenType.CATCH,
+    'break': TokenType.BREAK,
+    'continue': TokenType.CONTINUE,
+    'const': TokenType.CONST
   };
 
   constructor(source: string) {
@@ -50,11 +53,27 @@ export class Lexer {
       case ',': this.addToken(TokenType.COMMA, null, ","); break;
       case ':': this.addToken(TokenType.COLON, null, ":"); break;
       case ';': this.addToken(TokenType.SEMICOLON, null, ";"); break;
-      case '+': this.addToken(TokenType.PLUS, null, "+"); break;
-      case '-': this.addToken(TokenType.MINUS, null, "-"); break;
-      case '*': this.addToken(TokenType.STAR, null, "*"); break;
+      case '.': this.addToken(TokenType.DOT, null, "."); break;
+      case '+':
+        if (this.match('=')) this.addToken(TokenType.PLUS_EQUAL, null, "+=");
+        else this.addToken(TokenType.PLUS, null, "+");
+        break;
+      case '-':
+        if (this.match('=')) this.addToken(TokenType.MINUS_EQUAL, null, "-=");
+        else this.addToken(TokenType.MINUS, null, "-");
+        break;
+      case '*':
+        if (this.match('=')) this.addToken(TokenType.STAR_EQUAL, null, "*=");
+        else this.addToken(TokenType.STAR, null, "*");
+        break;
+      case '%':
+        if (this.match('=')) this.addToken(TokenType.PERCENT_EQUAL, null, "%=");
+        else this.addToken(TokenType.PERCENT, null, "%");
+        break;
       case '/':
-        if (this.match('/')) {
+        if (this.match('=')) {
+          this.addToken(TokenType.SLASH_EQUAL, null, "/=");
+        } else if (this.match('/')) {
           // Comment goes until the end of the line
           while (this.peek() !== '\n' && !this.isAtEnd()) this.advance();
         } else {

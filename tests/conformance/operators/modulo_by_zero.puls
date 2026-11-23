@@ -1,0 +1,2 @@
+// % by zero is a runtime error.
+print(1 % 0);

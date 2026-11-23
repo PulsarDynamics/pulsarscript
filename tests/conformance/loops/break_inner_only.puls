@@ -1,0 +1,9 @@
+// break in a nested loop leaves only that loop.
+var pairs = 0;
+for (var i = 0; i < 3; i += 1) {
+  for (var j = 0; j < 3; j += 1) {
+    if (j == 1) { break; }
+    pairs += 1;
+  }
+}
+print(pairs);

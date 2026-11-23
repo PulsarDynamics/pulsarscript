@@ -166,6 +166,8 @@ var opcodeInfo = map[byte]struct {
 	OpAnd: {"AND", 0}, OpOr: {"OR", 0}, OpTryPush: {"TRY_PUSH", 1}, OpTryPop: {"TRY_POP", 0},
 	OpNewArray: {"NEW_ARRAY", 1}, OpArrayGet: {"ARRAY_GET", 0}, OpArraySet: {"ARRAY_SET", 0},
 	OpNewObject: {"NEW_OBJECT", 1}, OpObjGet: {"OBJ_GET", 0}, OpObjSet: {"OBJ_SET", 0},
+	OpIndexGet: {"INDEX_GET", 1}, OpIndexSet: {"INDEX_SET", 1}, OpMod: {"MOD", 0},
+	OpFunc: {"FUNC", 1}, OpCallValue: {"CALL_VALUE", 1}, OpIterItems: {"ITER_ITEMS", 0},
 }
 
 // OpcodeName returns an opcode's mnemonic and operand count; ok is false for unknown opcodes.
@@ -194,6 +196,14 @@ func VerifyModule(mod Module) error {
 		}
 		if ip+operands >= len(code) {
 			return fmt.Errorf("%s at %d is missing operands", name, ip)
+		}
+		if op == OpFunc {
+			if _, ok := mod.Functions[code[ip+1]]; !ok {
+				return fmt.Errorf("FUNC at %d: no function at address %d", ip, code[ip+1])
+			}
+		}
+		if (op == OpIndexGet || op == OpIndexSet) && code[ip+1] != 0 && code[ip+1] != 1 {
+			return fmt.Errorf("%s at %d: operand must be 0 or 1, got %d", name, ip, code[ip+1])
 		}
 		if op == OpHostCall {
 			idx := code[ip+1]

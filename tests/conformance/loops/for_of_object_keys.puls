@@ -1,0 +1,5 @@
+// for...of over an object walks its keys in sorted order.
+var o = {b: 2, a: 1, c: 3};
+var ks = "";
+for (const k of o) { ks += k + "=" + o[k] + " "; }
+print(ks);

@@ -1,0 +1,3 @@
+// Reading past the end is a runtime error that try/catch sees.
+var a = [1, 2];
+try { print(a[5]); } catch (e) { print("caught " + e.kind); }

@@ -1,0 +1,6 @@
+// a[i] = v writes a copy: other variables holding the old array are unchanged.
+var a = [1, 2, 3];
+var b = a;
+a[1] = 20;
+print(a);
+print(b);

@@ -1,0 +1,4 @@
+// for...of over a string walks its characters.
+var n = 0;
+for (var ch of "aé😀") { n += 1; }
+print(n);

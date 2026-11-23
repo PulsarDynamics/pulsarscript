@@ -1,0 +1,6 @@
+// o.key and o["key"] read and write properties; a missing key reads as nil.
+var o = {name: "pulsar"};
+o.version = 5;
+o["kind"] = "os";
+print(o.name + " " + o.version + " " + o["kind"]);
+print(o.missing);

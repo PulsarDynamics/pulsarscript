@@ -1,0 +1,8 @@
+// Functions are values: stored, passed and called through variables.
+function double(x) { return x * 2; }
+function apply(f, x) { return f(x); }
+var g = double;
+print(g(4));
+print(apply(double, 5));
+print(typeOf(g));
+print(g == double);

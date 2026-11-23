@@ -1,6 +1,6 @@
 # PulsarScript Language Specification — v0
 
-**Status:** v0.4 records the language **as it behaves today** (November 2026). Every defect found in the audit is fixed, decided or closed (D1–D19), and Phase 1 is complete. v0.2 settled the value model, v0.3 made `vm/hostapi.json` the one registry of built-ins and bounded every run, and v0.4 connects PulsarOS apps to their scripts end to end (§9), with reliable error lines, a versioned bytecode header and the VM in this repository (§10). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
+**Status:** v0.5 records the language **as it behaves today** (November 2026). v0.5 adds the language core apps need: indexing and member access with assignment (§4.7), `%` and compound assignment, `break`/`continue`, `for…of`, `const`, and functions as values; and the host calls for files, storage and windows that installable apps use (§8). Earlier: Every defect found in the audit is fixed, decided or closed (D1–D19), and Phase 1 is complete. v0.2 settled the value model, v0.3 made `vm/hostapi.json` the one registry of built-ins and bounded every run, and v0.4 connects PulsarOS apps to their scripts end to end (§9), with reliable error lines, a versioned bytecode header and the VM in this repository (§10). Where today's behaviour is wrong or the two runtimes disagree, the rule says what the language *should* do and points to a defect (⚠ **Dn**). The [defect register](#12-defect-register) at the end lists all of them.
 
 **Authority:** the conformance suite in `tests/conformance/` is the executable form of this document. A rule without a conformance case is not yet pinned. Every language change must update this file and add or adjust cases in the same pull request.
 
@@ -25,7 +25,9 @@
 
 ### 2.1 Keywords
 
-`var` `function` `return` `if` `else` `while` `for` `print` `try` `catch` `true` `false` `nil`
+`var` `const` `function` `return` `if` `else` `while` `for` `break` `continue` `print` `try` `catch` `true` `false` `nil`
+
+`of` is not a keyword: it has its special meaning only in `for (var x of …)` and remains a valid identifier elsewhere.
 
 ### 2.2 Identifiers
 
@@ -33,7 +35,7 @@ A letter or `_`, followed by letters, digits or `_`. Identifiers are case-sensit
 
 ### 2.3 Number literals
 
-Decimal digits with an optional fractional part: `42`, `3.25`, `0.5`. There are no exponents (`1e3`), hex, octal, binary or digit separators. A trailing dot (`1.`) is a lexical error. Numbers are IEEE-754 double precision.
+Decimal digits with an optional fractional part: `42`, `3.25`, `0.5`. There are no exponents (`1e3`), hex, octal, binary or digit separators. A trailing dot (`1.`) is not part of the number: it lexes as `1` followed by `.`. Numbers are IEEE-754 double precision.
 
 `1e3` lexes as `1` followed by the identifier `e3`, which is a syntax error (fixed in D13: previously the statement was silently dropped).
 
@@ -43,9 +45,9 @@ Double-quoted: `"hello"`. Strings may span lines. In v0 there are **no escape se
 
 ### 2.5 Operators and punctuation
 
-`+ - * / ! = == != < <= > >= && || ( ) { } [ ] , : ;`
+`+ - * / % ! = += -= *= /= %= == != < <= > >= && || ( ) { } [ ] . , : ;`
 
-There is no `%`, `.`, `+=`/`-=`, `++`/`--` or ternary `?:` in v0. Any other character is a lexical error ("Unexpected character").
+There is no `++`/`--` or ternary `?:`. Any other character is a lexical error ("Unexpected character").
 
 ## 3. Values and types
 
@@ -57,8 +59,9 @@ There is no `%`, `.`, `+=`/`-=`, `++`/`--` or ternary `?:` in v0. Any other char
 | nil | `nil` | `"nil"` | the absence of a value; uninitialised variables and functions without a return value produce `nil` |
 | array | `[1, "a", true]` | `"array"` | ordered list of any values |
 | object | `{name: "x", n: 1}` | `"object"` | string keys to any values; keys in a literal are identifiers, a repeated key keeps the last value |
+| function | a function's name, `double` | `"function"` | a reference to a top-level or block function; prints as `<fn double>` |
 
-There are no function values in v0: functions cannot be stored in variables, passed as arguments or returned (planned for Phase 2).
+**Functions are values** (v0.5): a function's name, used anywhere but directly in a call, is a reference that can be stored in variables, arrays and objects, passed as an argument, returned and compared (`==` is true for the same function). Calling a value checks that it is a function and that the argument count matches, when the call runs. There are still no closures (§6): a function value cannot capture locals, and there are no anonymous function expressions. Built-ins and host calls are not values.
 
 ### 3.1 Truthiness
 
@@ -99,20 +102,20 @@ a = arrayPush(a, 3);       // to "append", assign the result
 
 | Level | Operators | Associativity |
 | --- | --- | --- |
-| Assignment | `=` | right |
+| Assignment | `=` `+=` `-=` `*=` `/=` `%=` | right |
 | Logical OR | `\|\|` | left |
 | Logical AND | `&&` | left |
 | Equality | `==` `!=` | left |
 | Comparison | `<` `<=` `>` `>=` | left |
 | Additive | `+` `-` | left |
-| Multiplicative | `*` `/` | left |
+| Multiplicative | `*` `/` `%` | left |
 | Unary | `!` `-` | right |
-| Call | `f(args)` | left |
+| Call, index, member | `f(args)` `x[k]` `o.key` | left |
 | Primary | literals, identifiers, `( expr )`, array and object literals | |
 
 ### 4.2 Arithmetic
 
-`+ - * /` on two numbers have IEEE-754 semantics, **except that division by zero is a runtime error** in both runtimes. Unary `-` negates a number.
+`+ - * /` on two numbers have IEEE-754 semantics, **except that division by zero is a runtime error** in both runtimes. `%` is the remainder with the sign of the dividend (`-7 % 3` is `-1`, `7.5 % 2` is `1.5`); `%` by zero is a runtime error. Unary `-` negates a number.
 
 **`+` concatenates when either operand is a string**, converting the other operand to its printed form (§3.2): `"a" + 1` → `"a1"`, `"v: " + nil` → `"v: nil"`, `"xs: " + [1]` → `"xs: [1]"`. `+` is left-associative, so `1 + 2 + "x"` is `"3x"` and `"x" + 1 + 2` is `"x12"`. (Fixed in D6.)
 
@@ -128,17 +131,36 @@ Any other arithmetic on a non-number, such as `true + 1` or `-"a"`, is a runtime
 
 ### 4.5 Assignment
 
-`name = expr` assigns to an existing variable and evaluates to the assigned value, so `a = b = 5` sets both. Assigning to an undeclared name is a compile-time error. (Fixed on the `vm` in D3; it used to create a global silently.)
+`name = expr` assigns to an existing variable and evaluates to the assigned value, so `a = b = 5` sets both. Assigning to an undeclared name, a `const` (§6) or a function declaration is a compile-time error. (Fixed on the `vm` in D3; it used to create a global silently.)
 
-Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`; see §8 for host calls).
+**Compound assignment** `x op= e` (for `+ - * / %`) is `x = x op e`.
+
+**Element and property assignment** `a[i] = v`, `o.key = v`, `a[i][j] = v`, `o.list[0] += 1` (v0.5):
+- Arrays and objects are values (§3.3), so assignment builds a copy with the new element and stores it back into the **variable at the root** of the target. Any other variable that held the old array or object is unchanged.
+- The root must be a variable: `f()[0] = 1` is a compile-time error.
+- It is a **statement** of its own (an expression statement or a `for` increment), not an expression: `x = (a[0] = 1)` is a compile-time error.
+- In a nested (`a[i][j] = v`) or compound (`a[i] += v`) target, every index must be a literal or a variable, because it is read more than once.
+- Writing at index `len(a)` appends; any other index outside `0..len(a)-1` is a runtime error. Strings cannot be assigned into.
 
 ### 4.6 Calls
 
-`name(arg, …)` calls a user function declared with `function` or a function in the registry (§8). At most 255 arguments. Only identifiers can be called. A user function with the same name as a built-in takes precedence.
+`name(arg, …)` calls a user function declared with `function` or a function in the registry (§8). At most 255 arguments. A user function with the same name as a built-in takes precedence. Any other expression that produces a function value can be called too: a variable or parameter holding one (`f(x)`), an element (`fns[0](x)`) or a property (`handlers.save(x)`); a local or global variable shadows a function or built-in of the same name.
 
 **Calls are resolved at compile time.** A name that is neither a user function nor in the registry is a compile-time error (`Unknown function 'x'.`), and so is a wrong argument count for a built-in. Argument *types* are checked when the call runs. (Fixed in D3: unknown names used to compile as host calls that failed at runtime, where `try`/`catch` could swallow them.)
 
 **Top-level functions are hoisted:** a call resolves to any function declared at the top level of the file, including one declared later and including calls made before the declaration. Functions declared inside a block are callable after their declaration within that block. (Fixed in D2.)
+
+### 4.7 Indexing and member access
+
+`x[k]` reads an element (v0.5):
+
+| `x` | `k` | Result |
+| --- | --- | --- |
+| array | integer number | the element; outside `0..len(x)-1` is a runtime error |
+| string | integer number | the character (Unicode code point) at that position, as a string |
+| object | string | the property's value, or `nil` when the key is missing |
+
+`o.key` is `o["key"]` for objects; on any other value it is a runtime error. A non-integer index, a non-string object key, or indexing `nil`, a number or a boolean is a runtime error. All of these are catchable.
 
 
 ## 5. Statements
@@ -151,12 +173,16 @@ Only plain identifiers are assignment targets in v0 (no `a[i] = v` or `o.k = v`;
 | Block | `{ … }` | opens a scope |
 | If | `if (cond) stmt` / `if (cond) stmt else stmt` | `else if` is an `if` in the else branch |
 | While | `while (cond) stmt` | |
+| Constant | `const name = expr;` | must be initialised; cannot be reassigned, nor its elements |
 | For | `for (init; cond; incr) stmt` | each part optional; `init` may be a `var` scoped to the loop |
+| For…of | `for (var x of e) stmt` / `for (const x of e) stmt` | `e` is evaluated once: an array yields its elements, an object its keys in sorted order, a string its characters; anything else is a runtime error |
+| Break | `break;` | leaves the innermost loop |
+| Continue | `continue;` | goes to the next iteration (a `for` loop runs its increment first) |
 | Function | `function name(p1, p2) { … }` | top level or nested in blocks |
 | Return | `return;` / `return expr;` | `return;` yields `nil` |
 | Try/catch | `try { … } catch (e) { … }` | `(e)` may be omitted |
 
-There is no `break`, `continue`, `switch`, `do…while`, `for…of`, `const` or `let` in v0.
+There is no `switch`, `do…while` or `let`. `break` and `continue` must be inside a loop of the same function (a compile-time error otherwise); they leave any blocks and `try` blocks in between.
 
 A syntax error stops compilation. The parser recovers after each error so that **every** syntax error in the file is reported in one pass, each with its line. (Fixed in D13: errors used to be swallowed and the statement silently dropped.)
 
@@ -166,6 +192,7 @@ A syntax error stops compilation. The parser recovers after each error so that *
 - Declaring the same name twice in one scope is an error.
 - **Top-level variables are globals**: a `var` outside every function, block and `try` block. Function bodies may read and assign globals declared anywhere in the file; at the top level a global must be declared before it is used. (Fixed in D1: the `vm` used to compile them as locals that functions could not see.)
 - A `var` inside a block, function body, `for` initializer or `try` block is local.
+- `const` declares a variable the same way (global at the top level, local elsewhere) that cannot be assigned again, directly or through an element or property.
 
 - Function parameters and `var`s inside a function are local to each call.
 - There are no closures in v0. A nested function cannot capture the enclosing function's locals.
@@ -283,14 +310,21 @@ Notes on the core functions:
 | `kvGet(key)` | key: string | any | `kv` | Value stored under key, or nil. |
 | `kvSet(key, value)` | key: string, value: any | any | `kv` | Stores value under key. |
 | `kvDelete(key)` | key: string | any | `kv` | Removes key. |
-| `fsRead(path)` | path: string | string\|nil | `fs.read` | File contents, or nil. |
-| `fsList(path)` | path: string | array | `fs.read` | Directory entries. |
-| `fsStat(path)` | path: string | object\|nil | `fs.read` | Entry metadata, or nil. |
+| `fsRead(path)` | path: string | string\|nil | `fs.read` | Contents of the file at path as text, or nil when it does not exist. |
+| `fsList(path)` | path: string | array | `fs.read` | Entries of the folder at path: objects {name, dir, size, modified}. |
+| `fsStat(path)` | path: string | object\|nil | `fs.read` | {name, dir, size, modified} for path, or nil when it does not exist. |
 | `fsExists(path)` | path: string | boolean | `fs.read` | Whether path exists. |
-| `fsWrite(path, content)` | path: string, content: any | boolean | `fs.write` | Writes string(content) to path. |
-| `fsDelete(path)` | path: string | boolean | `fs.write` | Deletes path. |
+| `fsWrite(path, content)` | path: string, content: any | boolean | `fs.write` | Writes string(content) to path, creating missing folders. |
+| `fsDelete(path)` | path: string | boolean | `fs.write` | Deletes the file or folder (with its contents) at path. |
+| `fsMkdir(path)` | path: string | boolean | `fs.write` | Creates the folder at path and any missing parents. |
+| `fsRename(from, to)` | from: string, to: string | boolean | `fs.write` | Renames or moves a file or folder. |
+| `fsCopy(from, to)` | from: string, to: string | boolean | `fs.write` | Copies a file or folder (recursively) to a new path. |
+| `fsQuota()` | — | object | `fs.read` | {used, max} in bytes for the user's storage. |
+| `fsReadBase64(path)` | path: string | string\|nil | `fs.read` | Contents of the file at path as Base64, for binary files; nil when it does not exist. |
+| `fsWriteBase64(path, data)` | path: string, data: string | boolean | `fs.write` | Writes Base64-decoded data to path, for binary files. |
 | `emitEvent(payload?)` | payload: any | any | `events` | Sends an event to the host. |
 | `pollEvent()` | — | any | `events` | Next queued event, or nil. |
+| `notifyWindow(payload)` | payload: any | nil | `window` | Sends payload to the app's open windows as an SDK script.event (progress, results of a service). |
 | `ipcSetContext(deviceId, processId)` | deviceId: string, processId: string | nil | `ipc` | Sets the device and process used by ipcSend. |
 | `ipcSend(channel, op, payload)` | channel: string, op: string, payload: any | any | `ipc` | Sends a PulsarOS IPC message; subject to the app's allowed channels and operations. |
 
@@ -315,19 +349,19 @@ Notes on the core functions:
 - **Calling a handler** (fixed in D11): the app sends the IPC envelope `{v: 1, deviceId, processId, channel: "ipc.call", op: "script.call", payload: {appId, handler, args}, nonce, ts}` to the API's `/api/ipc`; services use `script.service.start`, `stop` and `status`. A non-list `args` is the handler's one argument; a list is the argument list. Arguments and results convert between JSON and PulsarScript values in both directions, objects and arrays included. An app can always call its own handlers and no other app's.
 - Handlers run with the app's identity and permissions. A script's `ipcSend(channel, op, payload)` reaches only the channels in the manifest's `permissions.scopes` (none without scopes), is rate-limited and raises a runtime error when refused or when the target fails. `ipcSetContext` cannot switch a server script to another device or process.
 
-## 10. Bytecode format (version 1)
+## 10. Bytecode format (version 2)
 
 Produced by `compile.ts`, consumed by the Go VM (`vm/`, a Go module in this repository; hosts import `github.com/PulsarDynamics/pulsarscript/vm` at a `vm/vX.Y.Z` tag). JSON:
 
 ```json
 {
-  "format": "pulsarscript-bytecode", "version": 1,
-  "compiler": "pulsarscript 0.4.0", "sourceHash": "sha256:…",
+  "format": "pulsarscript-bytecode", "version": 2,
+  "compiler": "pulsarscript 0.5.0", "sourceHash": "sha256:…",
   "constants": [ … ], "code": [ … ], "functions": [ { "name", "address", "arity", "locals" } ], "lineMap": [ … ]
 }
 ```
 
-**Header** (decision A5): `format` identifies the file; `version` is the format version (`Bytecode.ts` `BYTECODE_VERSION`, Go `BytecodeVersion`); `compiler` names the compiler that wrote it; `sourceHash` is the SHA-256 of the UTF-8 source, so tools can tell a bundle that is stale against its `.puls` source. The VM loads version 1 and version 0 (a file with no header, written before SPEC v0.4, otherwise identical) and **rejects any other version or format** with an error asking to recompile or upgrade. Any change the VM must know about (opcodes, operands, fields) bumps the version.
+**Header** (decision A5): `format` identifies the file; `version` is the format version (`Bytecode.ts` `BYTECODE_VERSION`, Go `BytecodeVersion`); `compiler` names the compiler that wrote it; `sourceHash` is the SHA-256 of the UTF-8 source, so tools can tell a bundle that is stale against its `.puls` source. The VM loads versions 0 to 2 and **rejects any other version or format** with an error asking to recompile or upgrade. Version 0 is a file with no header (before SPEC v0.4), otherwise identical to 1. Version 2 (SPEC v0.5) adds `INDEX_GET`, `INDEX_SET`, `MOD`, `FUNC`, `CALL_VALUE` and `ITER_ITEMS`; the compiler always writes version 2, so an older VM refuses those files instead of misreading them. Any change the VM must know about (opcodes, operands, fields) bumps the version.
 
 - `code` is a flat array of opcode numbers, each followed by its operands. The opcode numbers are fixed by `Bytecode.ts`, mirrored in `vm/vm.go` and checked against each other by a Go test and a snapshot test; changing a number is a breaking format change and needs a version bump.
 - Operand counts: 1 for `CONST`, `DEFINE_GLOBAL`, `GET_GLOBAL`, `SET_GLOBAL`, `GET_LOCAL`, `SET_LOCAL`, `JUMP`, `JUMP_IF_FALSE`, `ENTER_BLOCK`, `EXIT_BLOCK`, `TRY_PUSH`, `NEW_ARRAY`, `NEW_OBJECT`; **2** for `CALL` (address, argument count) and `HOST_CALL` (name constant, argument count); 0 for the rest.

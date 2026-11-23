@@ -1,0 +1,7 @@
+// continue skips to the increment of a for loop.
+var s = 0;
+for (var i = 0; i < 6; i += 1) {
+  if (i % 2 == 0) { continue; }
+  s += i;
+}
+print(s);

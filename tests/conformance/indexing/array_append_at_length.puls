@@ -1,0 +1,5 @@
+// Writing at index len(a) appends.
+var a = [];
+a[0] = "x";
+a[len(a)] = "y";
+print(a);
