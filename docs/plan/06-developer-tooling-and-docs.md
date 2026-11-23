@@ -2,9 +2,9 @@
 
 23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
 
-Today a PulsarScript developer has a compiler, a REPL, `vmrun` and a first-app guide, and nothing in the editor or the OS that helps while writing. Gate G6 (15 days, Phase 5 of the Development Plan) adds a formatter, a linter, a language server, an in-OS Script Studio on a WebAssembly build of the VM, a debugger and generated docs. It ends when a developer new to PulsarOS writes, tests and debugs a handler from the docs alone. IDs refer to Doc 08.
+Today a PulsarScript developer has a compiler, a REPL, `vmrun` and a first-app guide, and nothing in the editor or the OS that helps while writing — and app UI authors have no local mock host or `.pulsar` template. Gate G6 (18 days, Phase 5 of the Development Plan plus `DX-07`) adds a formatter, a linter, a language server, an in-OS Script Studio on a WebAssembly build of the VM, a debugger, generated docs, and a local mock-host `fruit dev` workbench (`DX-07`, movable right after G3). It ends when a developer new to PulsarOS writes, tests and debugs a handler from the docs alone. IDs refer to Doc 08.
 
-G6 starts after Language 1.0 (G4): tools written against a moving grammar get rewritten.
+G6 starts after Language 1.0 (G4): tools written against a moving grammar get rewritten (`DX-07` depends only on G3 / `APP-01` and may move ahead of G6).
 
 ## What exists
 
@@ -29,6 +29,7 @@ G6 starts after Language 1.0 (G4): tools written against a moving grammar get re
 | DX-04 | WebAssembly VM and Script Studio | Build the Go VM with `GOOS=js GOARCH=wasm`. Script Studio is a PulsarOS app with an editor, output, a disassembly view and live budget meters for steps, time and memory. The Development Plan expects a 2–3 MB binary, so it loads only when Script Studio opens. Host calls that need the server (`fs*`, `kv*`) run against in-memory stand-ins and are labelled as such. This delivers decision A1 | 4 |
 | DX-05 | Debugger | Breakpoints by line, step in, over and out, and a view of locals and globals, built on the line maps and on `vmrun`'s step mode. Budgets pause while stopped at a breakpoint | 2 |
 | DX-06 | Docs site | Generated on every release from `SPEC.md`, the registry and the conformance cases, so every example on the site is a test that passes. Includes the SDK reference, the manifest reference and a refreshed first-app guide without the newline workaround | 1 |
+| DX-07 | Local mock-host `fruit dev` workbench & `.pulsar` `fruit create` templates | Replaces the legacy WebSocket/`devenv connect` `fruit dev` and `fruit.manifest.json` templates (`add-cli-dev-workflow`) as well as the earlier `SCRIPT_APPS_DIR` sketch. Serves `ui/` inside `<iframe sandbox="allow-scripts">` with production CSP, theme switcher (`light`/`dark`), scope toggles, mock pickers, local file root via `internal/apps/appfs`, in-process Go VM with default RPC budgets, live console drawer, and `fsnotify` recompile/reload (OpenSpec `update-fruit-dev-workbench`, Decision **A26**) | 3 |
 
 ## The exit test
 
@@ -44,16 +45,17 @@ The Development Plan left open whether `fruit` lives in pulsaros-api or moves ne
 
 | Command | State | Does |
 | --- | --- | --- |
+| `fruit create` | `DX-07` (replacing legacy templates) | Scaffold `.pulsar` `blank` and `starter` projects |
 | `fruit build` | Built (#53) | Compile, pack, hash, validate; links modules after LANG-12 |
 | `fruit publish` | Built (#53) | Upload a version |
 | `fruit fmt` | DX-01 | Format sources |
 | `fruit lint` | DX-02 | Lint sources against the manifest |
-| `fruit dev` | Proposed, inside DX-06's guide work | Serve an app from a local folder through `SCRIPT_APPS_DIR` with rebuild on change |
+| `fruit dev` | `DX-07` (OpenSpec `update-fruit-dev-workbench`) | Local HTTP mock-host workbench for `ui/` + in-process VM + `appfs` fake tree + live reload |
 | `fruit test` | Proposed, not estimated | Run an app's handlers against fixtures on the local VM |
 
 ## Order and overlap
 
-DX-01 and DX-02 come first because the language server reuses both. DX-04 can run in parallel with DX-03 when a second developer is available: one works in the pulsarscript repo, the other mostly in the frontend. With one developer the order is DX-01, DX-02, DX-03, DX-04, DX-05, DX-06.
+DX-01 and DX-02 come first because the language server reuses both. DX-04 can run in parallel with DX-03 when a second developer is available: one works in the pulsarscript repo, the other mostly in the frontend. `DX-07` can run immediately after G3 if app UI iteration needs it without waiting for G6. With one developer the order is DX-01, DX-02, DX-03, DX-04, DX-05, DX-06, DX-07.
 
 If third-party developers are expected soon, the hardening gate G7 runs before G6; tooling waits, safety does not (question Q1 in Doc 09).
 

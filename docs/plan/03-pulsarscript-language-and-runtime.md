@@ -1,22 +1,22 @@
 # PulsarOS Development Plan — 03 · PulsarScript Language and Runtime
 
-23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
+23 Nov 2026 · Prepared for Berk Ormanlı · Status: language gates G0/G2/G4/G5/G7 implemented and verified in `pulsarscript` (v1.2.0)
 
-PulsarScript is correct and well tested; what it lacks is a memory limit and the features that make real app logic pleasant to write. This doc plans the remaining language work in four steps: memory limits and loader fuzzing now (G0 and G2, 2 days), **Language 1.0** with escapes, templates and closures (G4, 12 days), the **runtime and standard library** (G5, 14 days), and performance and compatibility (G7, 4.5 days). IDs refer to Doc 01 and Doc 08.
+PulsarScript now includes bounded memory limits, fuzzed bytecode/parser gates, **Language 1.0** (escapes, templates, closures, CoW collection updates, code-point string ordering, pragmatic syntax, column diagnostics & `stack`), the expanded **standard library, events, async host call suspend/resume, and build-time modules** (G5), plus compiler/VM performance optimizations and v0–v3 compatibility enforcement (G7). IDs refer to Doc 01 and Doc 08.
 
 ## Where the language stands
 
-| | On `main` (SPEC v0.4) | After pulsarscript#18 (SPEC v0.5) |
-| --- | --- | --- |
-| Bytecode | version 1, 42 opcodes | version 2, 48 opcodes; the VM reads versions 0–2 |
-| Registry (`vm/hostapi.json`) | 53 functions | 60 functions, 20 tied to a capability |
-| Conformance cases | 122, passing on both runtimes | 159, passing on both runtimes |
-| VM release | `vm/v0.4.0` | `vm/v0.5.0`, to tag after merge |
-| Language | variables, functions, `if`/`while`/`for`, `try`/`catch`, arrays and objects as values | adds `a[i]`, `o.key`, element assignment, `%`, compound assignment, `break`/`continue`, `for…of`, `const`, functions as values |
+| | On `main` (SPEC v0.4) | After #18 (SPEC v0.5) | Completed (`v1.2.0` / SPEC v1.0) |
+| --- | --- | --- | --- |
+| Bytecode | version 1, 42 opcodes | version 2, 48 opcodes; v0–2 loaded | version 3, 52 opcodes (`CLOSURE`–`CLOSE_UPVALUE`, `sources`/`fileMap`); v0–3 loaded & tested |
+| Registry (`vm/hostapi.json`) | 53 functions | 60 functions, 20 capability-gated | 99 functions (`LANG-09` stdlib + `on`/`emit`/`sleep`/`yield` + `deprecated` metadata) |
+| Conformance cases | 122 | 159 | **285 cases**, passing 285/285 on both `interp` and `vm` |
+| Benchmarks (Go VM) | — | 20k appends 2.2s, 10k keys 2.9s, 20k char walk cap | **20k appends 11.2 ms**, **10k keys 6.5 ms**, **51k Unicode char walk 10.8 ms**, `listSorted(200)` **133.4 steps/entry** (< 140) |
+| Language | basic control flow & values | indexing, `%`, `break`/`continue`, `for…of`, `const`, fn values | escapes, templates, closures, CoW collections, string ordering, `/* */`, `?:`, `0x`/`1e3`, full stdlib, events, async suspend/resume, build-time `import`/`export` modules |
 
 All 19 audited defects are resolved and all seven original architecture decisions are approved. A4 (capabilities per host call) is implemented in pulsaros-api#53. A1 (the Go VM as the only runtime, built to WebAssembly for the browser) is the one with no code yet; DX-04 delivers it.
 
-**Limits today:** 10 million steps and 10 s per run by default, 250,000 steps and 1.5 s per RPC call in the API, stack depth 1,024, call depth 256. Nothing limits memory (N1).
+**Limits today:** 10 million steps and 10 s per run by default, 250,000 steps and 1.5 s per RPC call in the API, stack depth 1,024, call depth 256. Nothing limits memory (N1). Probe measurements on `main` (`7619cb9`) also recorded two accepted runtime bounds (**L25**): walking a string character by character caps near ~20,000 characters per RPC call (mitigated by windowing, `LANG-09` string ops and `LANG-07`), and recursion stops at 256 calls deep (by design, D10).
 
 **Roadmap position:** Phases 0 and 1 are done. Phase 2 is roughly three quarters built (in #18). Phase 3 has its capability checks, file host calls, persistent storage and `notifyWindow` built in #53. Phases 5 and 6 have not started.
 
@@ -53,9 +53,11 @@ Installed apps bring bytecode from outside, and the API loads it after `VerifyMo
 | LANG-04 | Template literals | `` `Hi ${name}` `` compiles to concatenation under the D6 rule. Nested templates and escapes are supported; tagged templates are not |
 | LANG-05 | Closures | Anonymous functions that capture variables, in the Lua style the Development Plan chose: a captured variable lives in an upvalue shared by the function that declared it and every closure over it. New opcodes for creating a closure, reading and writing an upvalue, and closing upvalues when a scope ends. Bytecode version 3. Values keep copy semantics (D15); only the variable slot is shared. Memory limits count closures. `registerHandler` by name keeps working, and also accepts a function value |
 | LANG-06 | Better errors | Compile errors for unreachable code, duplicate declarations and wrong arity on known functions. Column numbers in compile errors. Runtime errors gain a `stack` field next to `{kind, line, message}`; it is an addition, so existing `catch` code keeps working |
-| LANG-08 | Release | `SPEC.md` v1.0; at least 250 conformance cases; loader tests against stored version 0, 1 and 2 bundles; benchmark baseline (fib, loops, string building, array operations, handler dispatch); tag `v1.0.0` |
+| LANG-17 | CoW collection updates (N5) | Split out of `LANG-07` after probes showed every `a[len(a)] = v` or `o[k] = v` copies the whole value: 20,000 appends take 2.2 s, 10,000 object keys take 2.9 s, and ~7,000 object keys blow the 1.5 s RPC time budget while still far inside the 250,000-step budget. Copy-on-write or reference-counted backing preserves value/copy semantics (D15) with O(1) amortized unshared writes |
+| LANG-18 | String ordering, nested indices & pragmatic v1.0 syntax (N6, A22) | Lexicographic string ordering (`<`, `<=`, `>`, `>=` by code point) so scripts can sort filenames; lift the `SemanticAnalyzer` restriction requiring a plain variable index in nested targets so `o.items[len(o.items)] = i` compiles; pragmatic v1.0 syntax: block comments `/* ... */`, ternary `?:`, and scientific/hex number literals (`1e3`, `0x...`) unified with `parseFloat` and `number()`. `++`, `switch`, and `do…while` stay excluded under A6 |
+| LANG-08 | Release | `SPEC.md` v1.0; at least 280 conformance cases; loader tests against stored version 0, 1 and 2 bundles; benchmark baseline (fib, loops, string building, array/object building, handler dispatch); tag `v1.0.0` |
 
-**Getting from 159 to 250 cases.** A working split of the 91 new cases: escapes 10, templates 12, closures 30, compile errors 12, memory limits 6, old-version loading 6, regressions found on the way 15.
+**Getting from 159 to 280 cases.** A working split of the 121 new cases: escapes 10, templates 12, closures 30, compile errors 12, memory limits 6, old-version loading 6, CoW aliasing and collection benchmarks 12, string ordering, nested indices and syntax (`/* */`, `?:`, `1e3`/`0x`, `parseFloat`/`number` parity) 18, regressions found on the way 15.
 
 **Closures are the risk.** The Development Plan put closures at about a third of Phase 2 and named them the feature most later work depends on; that is the 6 days here. Order of work inside LANG-05:
 
@@ -76,12 +78,12 @@ Everything is added through `hostapi.json`, so each function gets a type, docs, 
 
 | Area | Functions |
 | --- | --- |
-| Array | map, filter, reduce, find, sort with an optional comparator, slice, join, index-of, includes |
-| String | split, replace, starts-with, ends-with, pad, repeat, index-of |
-| Object | keys, values, entries, has, merge |
-| JSON | parse, stringify |
-| Time | now, format, parse |
-| Math | whatever is missing after D5 |
+| Array | `arrayMap`, `arrayFilter`, `arrayReduce`, `arrayFind`, `arraySort` (uses string/number order with optional comparator), `arraySlice` (already in v0.5), `arrayJoin`, `arrayIncludes` |
+| String | `split`, `replace`, `startsWith`, `endsWith`, `lastIndexOf`, optional `start` on `indexOf`, `padStart`, `padEnd`, `repeat`, `charCodeAt`, `fromCharCode` |
+| Object | `objDelete`, `objEntries`, `objMerge` (alongside existing `objKeys`, `objValues`, `objHas`, `objGet`, `objSet`) |
+| JSON | `jsonParse`, `jsonStringify` |
+| Time | `dateFormat`, `dateParse` (alongside existing `clock`) |
+| Math | `sin`, `cos`, `tan`, `atan2`, `log`, `log10`, `exp`, plus any constants/helpers missing after D5 |
 
 Two choices to settle on the first day:
 
@@ -102,13 +104,15 @@ A host call may suspend the VM and resume it later with a result, so `fsRead` or
 
 ### LANG-13: the exit test
 
-The reference script (batch rename plus folder watcher, as FileManagerPro has) runs in RPC and service modes, using only specified features, inside default budgets. One thing to settle here: the installable-app work pages long jobs through RPC calls with a cursor instead of running them as services. With events and async host calls in place, decide which pattern the docs recommend and make File Manager Lite follow it.
+The reference script ([`examples/file-manager-reference.puls`](../../examples/file-manager-reference.puls) + [`examples/file-manager-utils.puls`](../../examples/file-manager-utils.puls)) runs in both RPC (`listSorted`, `planRename`, `applyRenamePage` over 500 entries) and service modes (`on("fs.change", ...)` emitting `"watcher.summary"`), using only specified features, inside default budgets (`RPCVMConfig` and `ServiceVMConfig`).
+
+**Pattern decision (settled):** Keep **cursor-paged RPC handlers** (`cursor`, `pageSize` -> `{nextCursor, done}`) for UI-initiated long batch operations (so windows receive incremental progress and fit comfortably within the 250,000-step / 1.5 s per-RPC budget), and reserve **event-driven services** (`on`/`emit` + async host calls via `ErrSuspended`/`ResumeAsync`) for background watchers and push notifications. File Manager Lite continues using cursor-paged RPC calls for interactive actions.
 
 ## G7 — Performance and compatibility
 
 | Item | What | Target |
 | --- | --- | --- |
-| LANG-07 | Stop copying the whole value on an element update such as `t.files += 1`; constant folding and peephole passes in the compiler; fewer `Value` copies in the VM loop | Faster than the G4 baseline on every benchmark; File Manager Lite below today's roughly 140 steps per folder entry |
+| LANG-07 | Constant folding and peephole passes in the compiler; fewer `Value` copies in the VM loop; faster string indexing (`L25` walk path), building on `LANG-17`'s CoW updates | Faster than the G4 baseline on every benchmark; File Manager Lite below today's roughly 140 steps per folder entry |
 | LANG-14 | Fuzz the parser and compiler nightly | No crash; every rejected input has a line number |
 | LANG-15 | Compatibility policy | The VM loads bytecode versions N and N−1. A host call is deprecated for one minor release, with a compile warning, before removal. Legacy `.poo` sources and `.app` packages get an end date (Doc 04) |
 
@@ -123,7 +127,7 @@ Regressions above 10% on a tracked benchmark need a note in the PR, as the Devel
 | `vm/v0.4.0` | Released; SPEC v0.4 | 1 | — |
 | `vm/v0.5.0` | #18: indexing, members, loops, `const`, function values | 2 | G0 |
 | `v0.6.0` | Memory limits; fuzzed loader | 2 | G2 |
-| `v1.0.0` | Escapes, templates, closures, better errors; SPEC v1.0 | 3 | G4 |
+| `v1.0.0` | Escapes, templates, closures, CoW collections, string ordering & pragmatic syntax, better errors; SPEC v1.0 | 3 | G4 |
 | `v1.1.0` | Standard library, events, async host calls, modules | 3, or 4 if the event work needs new opcodes | G5 |
 | `v1.2.0` | Performance work; compatibility policy in force | unchanged | G7 |
 

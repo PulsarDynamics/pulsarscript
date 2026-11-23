@@ -2,11 +2,15 @@
 
 The plan that takes PulsarOS, the PulsarOS API and PulsarScript from today's state to a
 publicly deployable platform for installable apps: eight gates (G0–G7) plus a weekly health
-track, 71 backlog items, about 108 developer-days.
+track, 78 backlog items, about 122 developer-days.
 
 **Approved 23 Nov 2026.** Decisions A12–A21 were approved as recommended, and the recommended
-answer was adopted for every open question that had one. Doc 09 records this. The
-"Status: proposed" lines at the top of the other docs predate the approval.
+answer was adopted for every open question that had one. Later on 23 Nov 2026, the plan was
+reconciled with `pulsaros-api/openspec/` and empirical findings from building Markdown Viewer and
+probing PulsarScript against the RPC budget (adding decisions A22–A26, OpenSpec proposals
+`add-app-file-handles`, `add-app-sdk-theme-and-urls`, `add-app-sdk-ui-kit` and
+`update-fruit-dev-workbench`, and items `LANG-17`, `LANG-18`, `APP-09`–`APP-12`, `FE-16`, `DX-07`).
+Doc 09 records this. The "Status: proposed" lines at the top of the other docs predate the approval.
 
 ## Read in this order
 

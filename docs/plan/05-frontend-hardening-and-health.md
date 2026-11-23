@@ -2,7 +2,7 @@
 
 23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
 
-The frontend is the largest codebase and the least verified: about 79,300 lines, 121 unit tests after pulsaros#60, no browser test, and 512 type errors held at a baseline. This doc plans three things: the security fixes that share gate G3 with the app platform (4 days), the remaining hardening changes in G7 (1.25 days), and a health track of about one day a week that brings the type baseline to zero and moves the session out of `localStorage` (16 frontend days of the 21.5-day track). IDs refer to Doc 01 and Doc 08.
+The frontend is the largest codebase and the least verified: about 79,300 lines, 121 unit tests after pulsaros#60, no browser test, and 512 type errors held at a baseline. This doc plans three things: the security and App Store fixes that share gate G3 with the app platform (4.5 days), the remaining hardening changes in G7 (1.25 days), and a health track of about one day a week that brings the type baseline to zero and moves the session out of `localStorage` (16 frontend days of the 21.5-day track). IDs refer to Doc 01 and Doc 08.
 
 ## Where the frontend stands
 
@@ -18,7 +18,7 @@ The frontend is the largest codebase and the least verified: about 79,300 lines,
 
 Four of the thirteen hardening changes are merged: F1 ("Remember me" keeps a token, lasting as long as the API's `SESSION_LIFETIME`, one hour by default), F2 (password change), F3 (file-name markup) and F6 (CI). The Development Plan of 22 November still lists them as in review; the landing page and the analysis of 23 November record them as merged.
 
-## G3 — Security fixes (4 days)
+## G3 — Security and App Store fixes (4.5 days)
 
 | Item | Finding | Change | Test |
 | --- | --- | --- | --- |
@@ -27,6 +27,7 @@ Four of the thirteen hardening changes are merged: F1 ("Remember me" keeps a tok
 | FE-03 | F4 | Shell writes user CSS into a `<style>` element's `textContent` instead of `{@html}` | `</style><img onerror=…>` in user CSS creates no element |
 | FE-04 | F5 | Merge `src/ts/sanitizer.ts`, `src/ts/util/sanitizer.ts` and `SafeHtml.svelte` into one module; drop the `style` attribute; add `rel="noopener noreferrer"` to `target="_blank"` links; review every remaining `{@html}` (SettingsOption, Wizard, Boot) | One import path for sanitizing; a unit test per sink |
 | FE-05 | F13 | Fix or delete the 17 components that do not compile: dynamic `class:` directives in 14, JSX in `Chip`, a bad attribute in `TimelineItem`, optional chaining on the left of an assignment in `TreeView`. Most are unused, so delete first. Make the shared `Button` forward `on:click`; pulsaros#60 found that the App Store's buttons never fired because of it | Every file in `src/lib/Components` parses; the ESLint ignore list loses those entries |
+| FE-16 | L24 | Populate App Store details fields (`longDescription`, bundle size, updated timestamp, screenshots, verified badge) from `AppResponse`, and read `.pulsar` `script.handlers` instead of legacy `script.exports.handlers` in `AppDetails.svelte` | Details modal renders screenshots, features, size, verified badge, long description and installed `.pulsar` handlers |
 
 FE-03 and FE-04 matter more once themes or app content can be shared between users: today F4 is self-inflicted only.
 

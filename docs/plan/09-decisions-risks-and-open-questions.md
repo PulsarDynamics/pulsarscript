@@ -2,7 +2,7 @@
 
 23 Nov 2026 · Prepared for Berk Ormanlı · Status: **approved 23 Nov 2026**, with the recommended answers adopted
 
-Eleven architecture decisions were already approved and nine of them are built. On 23 November the ten decisions this plan proposed (A12–A21) were approved, and the recommended answer was adopted for every open question that had one. Two questions are still open: Q2 (second developer) had no recommendation, and Q5 (platform) has its constraints settled but needs a platform named. The risk register merges the two registers in the project docs and adds what the audit and the analysis imply. IDs refer to Doc 01 and Doc 08.
+Eleven architecture decisions were already approved and nine of them are built. On 23 November the ten decisions this plan proposed (A12–A21) were approved, and the recommended answer was adopted for every open question that had one; later that day decisions A22–A26 were added after reconciling `pulsaros-api/openspec/` and empirical Markdown Viewer / PulsarScript probe findings. Two questions are still open: Q2 (second developer) had no recommendation, and Q5 (platform) has its constraints settled but needs a platform named. The risk register merges the two registers in the project docs and adds what the audit and the analysis imply. IDs refer to Doc 01 and Doc 08.
 
 ## Decisions already made (A1–A11)
 
@@ -26,7 +26,7 @@ All ten were approved as recommended.
 
 | ID | Decision | Approved | Alternative, and why not | Needed by | Progress |
 | --- | --- | --- | --- | --- | --- |
-| A12 | Where roles live | Server-owned `user_roles` and `publisher_members` tables behind one `authz` package; admin granted by command only; existing flags backfilled after review. Fixing C2 comes before the merge train | Keep roles in `properties` with a stricter filter: every filter so far has been bypassed (C2) | G0 | SEC-01 in review as pulsaros-api#54: it adds `internal/authz`, which reads roles by exact key only. SEC-02 next |
+| A12 | Where roles live | Server-owned `user_roles` and `publisher_members` tables behind one `authz` package; admin granted by command only; existing flags backfilled after review. Fixing C2 comes before the merge train | Keep roles in `properties` with a stricter filter: every filter so far has been bypassed (C2) | G0 | Implemented on master: pulsaros-api#54, #58 (closes C2) |
 | A13 | How sessions are held | Tokens stored as hashes on the server (SEC-13); the browser session in an HttpOnly cookie with CSRF protection (FE-13); bearer header kept for tools | Stay in `localStorage`: any XSS hands over a live session | SEC-13 at G1; FE-13 in the health track | Not started |
 | A14 | How app UIs are delivered | A dedicated hostname for app UIs; a wrapper frame whose CSP pins navigation; a short-lived token in the UI path when `AUTH_CODE` is set | Serve from the API origin and only detect navigation: the first request has already leaked (N3). Exempt UI files from `AUTH_CODE`: reveals which apps a protected server hosts | Spike in G3; token path in G2 | Not started |
 | A15 | How schemas change | One migration runner with a tracking table; deployments run it as a step; the server refuses to serve on an old schema | Apply at server start in production: two instances starting together race, and a failed migration takes the service down | G2 | Not started |
@@ -37,13 +37,23 @@ All ten were approved as recommended.
 | A20 | Versioning across repos | Semantic versions in all three repos; a compatibility table; contracts bump as listed in Doc 07; the API never pins an untagged VM commit | Ad hoc: nothing says which frontend works with which API | G2 | Not started |
 | A21 | When non-admins may publish | Only after the checklist in Doc 04: roles, memory limits, browser tests, navigation leak, host review, quotas, signatures | Open publishing with the installable-app merge: the sandbox is unproven in a browser | Before APP-07 | Holding: publishing stays admin-only |
 
+## Decisions approved after Markdown Viewer and PulsarScript probe (A22–A26)
+
+| ID | Decision | Approved | Alternative, and why not | Needed by | Progress |
+| --- | --- | --- | --- | --- | --- |
+| A22 | PulsarScript unplanned syntax | Pragmatic v1.0 subset in G4 (`LANG-18`): block comments `/* ... */`, ternary `?:`, and scientific/hex literals (`1e3`, `0x...`) unified with `parseFloat`/`number()`; `++`, `switch` and `do…while` stay excluded under A6 | Implement all six constructs (`++`, `switch`, `do…while`) or reject everything: misses common expressions and leaves literal/`number()` parity mismatched | G4 (`LANG-18`) | Approved 23 Nov |
+| A23 | Quadratic collection updates | Split copy-on-write collection backing (preserving D15 value semantics) out of G7 `LANG-07` into G4 `LANG-17`, and pair with code-point string ordering and non-variable nested index expressions (`LANG-18`) | Leave `LANG-07` in G7: ~7,000 object keys blow the 1.5 s RPC time budget inside 250k steps, and scripts cannot sort file names | G4 (`LANG-17`, `LANG-18`) | Approved 23 Nov |
+| A24 | Scoped file grants, pickers & file types | Live `grant:<handle>` paths resolved in `appfs` (`add-app-file-handles`), `dialog.openFile` supporting `multiple: true` (up to 50 files per pick in v1), `openFolder`, `saveFile`, manifest `fileTypes`, `Pulsar.info.launch`, and revoke UI in **Settings → Apps** | Copy files into `Inbox/` or add separate `handle` parameters; single-file pick only: piles up stale copies, churns `hostapi.json`, and makes multi-file picks awkward | G5 (`APP-09`, after `APP-03`) | Approved 23 Nov; OpenSpec `add-app-file-handles` updated |
+| A25 | Theme `scheme`, `os.openUrl` & SDK UI kit | Send `scheme: "light"\|"dark"` in theme snapshots and add confirmed `Pulsar.os.openUrl` in G3 (`APP-10`, `add-app-sdk-theme-and-urls`); ship plain-CSS `pulsar-app-ui.css` + self-hosted Material Icons route `/v1/apps/sdk/v1/fonts/{file}` in G5 (`APP-11`, `add-app-sdk-ui-kit`); defer menus, shortcuts, context menus and window bounds (`APP-12`) to *Later* | Wait for `APP-11` or import Svelte/Google Fonts into iframes: Google Fonts fails iframe CSP (`connect-src 'none'`), and apps keep duplicating layout CSS | G3 (`APP-10`), G5 (`APP-11`), Later (`APP-12`) | Approved 23 Nov; OpenSpecs `add-app-sdk-theme-and-urls` & `add-app-sdk-ui-kit` drafted |
+| A26 | Local app workbench & UI console | Replace legacy WebSocket/`devenv connect` `fruit dev` and `fruit.manifest.json` templates (`add-cli-dev-workflow`) with a loopback HTTP mock-host workbench (`DX-07`) backed by `appfs` and the in-process Go VM; extend `APP-05` with bounded iframe console forwarding (`update-fruit-dev-workbench`) | Keep `devenv connect` or `SCRIPT_APPS_DIR`-only dev flow: requires full server/DB setup just to test UI changes and leaves window `console.*` invisible | G3 (`APP-05`), G6 (`DX-07`, movable after G3) | Approved 23 Nov; OpenSpec `update-fruit-dev-workbench` drafted |
+
 ## Risk register
 
 Likelihood and impact are this plan's judgement on a three-step scale.
 
 | # | Risk | Likelihood | Impact | Mitigation | Status |
 | --- | --- | --- | --- | --- | --- |
-| R1 | The API is exposed, or the app PRs merge, before C2 is closed | Medium | High | G0 order: SEC-01 the same day, SEC-02 before APP-01. Keep the API off the public internet until G1. #53 carries its own struct-decoded `isAdmin` and must switch to `authz.IsAdmin` before or right after merging | Mitigating: SEC-01 in review (#54) |
+| R1 | The API is exposed, or the app PRs merge, before C2 is closed | Medium | High | G0 order: SEC-01 the same day, SEC-02 before APP-01. Keep the API off the public internet until G1. #53 switched its upload check to `authz.IsAdmin` in #58 | Mitigated: SEC-01 (#54) & SEC-02 (#58) merged on master |
 | R2 | Three large PRs merge together and break a default branch | Medium | Medium | Merge train with a check after each step and a one-merge revert (Doc 04) | Open |
 | R3 | One developer reviews everything; 45 of the API's 63 non-merge commits came from a bot | High | Medium | Small PRs, required CI, the route-table test, gates with exit tests; a second developer (Q2) | Open |
 | R4 | Closures take longer than 6 days (upvalue capture, interpreter parity) | Medium | Medium | Staged delivery in LANG-05; 1.0 can ship without capture; `registerHandler` by name keeps working | Carried over from the Development Plan |
@@ -59,11 +69,13 @@ Likelihood and impact are this plan's judgement on a three-step scale.
 | R14 | The WebAssembly VM is 2–3 MB | High | Low | Load it only in Script Studio; look at TinyGo if size matters | Carried over |
 | R15 | Publishers ship harmful apps | Low now | High | Admin-only publishing (real only after SEC-02); signatures and review before opening (A21) | Carried over |
 | R16 | File Manager Lite grows toward parity with the built-in File Manager | Medium | Low | Feature list frozen at the M6 scope | Carried over |
-| R17 | Apps look out of place because an iframe does not inherit the OS's CSS | Low | Low | The SDK sends theme variables on open and on change; check it in QA-02 | Carried over, mitigated by design |
+| R17 | Apps look out of place because an iframe does not inherit the OS's CSS or icon font | Low | Low | The SDK sends theme variables plus light/dark `scheme` (`APP-10`) on open and change, and apps can opt into `pulsar-app-ui.css` + self-hosted Material Icons (`APP-11`); check it in QA-02 | Mitigating (`APP-10` in G3, `APP-11` in G5) |
 | R18 | Long jobs exceed run budgets | Low | Medium | Cursor paging today; events and async host calls in G5; LANG-13 settles the pattern | Carried over, mitigated |
 | R19 | Svelte 4 falls further behind while the baseline is burned down | Medium | Low | FE-15 produces a dated plan; no migration before FE-11 reaches zero | New |
 | R20 | In-memory state is lost on every restart or deploy (VMs, IPC registry, events) | High | Low to medium | Graceful shutdown (OPS-05); clients reconnect; OPS-09 only if a second replica is needed | New, from M9 |
 | R21 | The frontend writes a top-level properties key that SEC-01's allow-list does not include, and the setting is silently lost on save | Low | Low | The allow-list mirrors the frontend's `UserData` type; the server logs every dropped key by name; review the log after deploying #54 | New, from SEC-01 |
+| R22 | A compromised app uses `Pulsar.os.openUrl` query parameters to leak data through the Web Browser | Low to medium | Medium | Strict `http:`/`https:` allowlist (max 2,048 chars), 5/min rate limit, and mandatory desktop prompt naming the app and showing the full URL/origin before opening (`APP-10`) | New, from `APP-10` |
+| R23 | Copy-on-write backing in `LANG-17` accidentally shares mutations across variables or function calls | Medium | High | Dual-runtime conformance tests explicitly testing nested aliasing, loop captures, and parameter passing under D15 copy semantics | New, from `LANG-17` |
 
 Retired: "moving the VM into the pulsarscript repo churns pulsaros-api" (done under A7), and "script calls are slow for interactive use" (settled by design: browsing goes through the SDK, scripts handle multi-file work).
 
@@ -87,7 +99,7 @@ On 23 November the recommended answer was adopted for every question that had on
 | Q12 | May a deleted username be registered again? When must SHA-256 passwords be reset? | No reuse; reset 60 days after SEC-09 ships | SEC-06, SEC-09 | Week 2 | Answered |
 | Q13 | Does File Manager Lite replace the built-in File Manager? | Decide after G3, with browser tests as evidence | Nothing before G3 | After G3 | Answered (deferred by design) |
 
-Questions the project docs asked that are now settled: A1 and A6 are approved; A8 is approved; admins publish in v1; apps get a private folder with `fs.user` as a separate scope; dragging out of app windows is not in v1 (kept as APP-08, design only).
+Questions the project docs asked that are now settled: A1 and A6 are approved; A8 is approved; admins publish in v1; apps get a private folder with `fs.user` as a separate scope; dragging out of app windows is not in v1 (kept as APP-08, design only); `add-app-file-handles` open questions were settled on 23 Nov (multi-file pick supported in v1 via `multiple: true` up to 50 files; revoke list in Settings → Apps; Decision A24).
 
 ## Found while doing G0
 
