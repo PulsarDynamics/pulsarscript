@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script>try{var s=localStorage.getItem("color-scheme");if(s==="light"||s==="dark")document.querySelector('meta[name="color-scheme"]').content=s;}catch(e){}</script>
+  <title>PulsarScript v1.2 — Sandboxed Bytecode Scripting for PulsarOS</title>
+  <meta name="description" content="PulsarScript v1.2 is a deterministic, capability-gated scripting language and Go bytecode VM built for PulsarOS apps.">
+  <link rel="icon" type="image/png" href="./pulsar-logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./site-data.js"></script>
+  <script defer src="./pulsar-runtime.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a href="#main-content" class="skip-link visually-hidden">Skip to main content</a>
+
+  <header class="site-header" id="site-header">
+    <div class="header-inner" id="header-inner">
+      <a class="site-logo" href="#overview" aria-current="page">
+        <img src="./pulsar-logo.png" alt="" width="34" height="34" class="logo-img">
+        <span>PulsarScript</span>
+        <span class="version-pill">v1.2.0</span>
+      </a>
+
+      <div class="header-actions">
+        <nav class="site-nav" aria-label="Primary">
+          <button
+            class="menu-button"
+            type="button"
+            popovertarget="site-menu"
+            popovertargetaction="toggle"
+            aria-controls="site-menu"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <line x1="4" y1="6" x2="20" y2="6"/>
+              <line x1="4" y1="12" x2="20" y2="12"/>
+              <line x1="4" y1="18" x2="20" y2="18"/>
+            </svg>
+            <span>Menu</span>
+          </button>
+
+          <ul id="site-menu" class="site-menu" popover="auto">
+            <li><a href="#playground">Try Live</a></li>
+            <li><a href="#why">Why Pulsar</a></li>
+            <li><a href="#architecture">Architecture</a></li>
+            <li><a href="#benchmarks">Benchmarks</a></li>
+            <li><a href="#api">API Explorer</a></li>
+            <li><a href="#quickstart">Quickstart</a></li>
+          </ul>
+        </nav>
+
+        <button class="theme-toggle" id="theme-toggle" type="button">
+          <span class="theme-to-dark">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+            <span class="visually-hidden">Switch to dark theme</span>
+          </span>
+          <span class="theme-to-light">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"/>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+            </svg>
+            <span class="visually-hidden">Switch to light theme</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="overview">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow">PulsarOS Runtime · SPEC v1.0 · Bytecode v3</span>
+          <h1 id="main-content" tabindex="-1">Sandboxed scripts built to <span class="hero-title-accent">stay in the cage.</span></h1>
+          <p class="lead">
+            PulsarScript compiles <code>.puls</code> modules to verified Bytecode v3 for PulsarOS apps—pairing closures, Copy-on-Write values, and 97 typed functions with capability gates and uncatchable CPU and memory caps.
+          </p>
+
+          <div class="cta-row">
+            <a class="btn btn-primary" href="#playground">Open Live Sandbox</a>
+            <a class="btn btn-secondary" href="#api">Explore 97 Functions</a>
+          </div>
+
+          <div class="cli-strip">
+            <code class="cli-cmd" id="hero-cli-cmd"><span class="cli-prompt" aria-hidden="true">$</span>bun run compile.ts -s app.puls out.json</code>
+            <span class="copy-wrap">
+              <button type="button" class="copy-button" command="--copy" commandfor="hero-cli-cmd">
+                <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Copy</span>
+                <span class="visually-hidden">CLI compile command</span>
+              </button>
+              <span class="copy-tip" role="status"></span>
+            </span>
+          </div>
+
+          <dl class="hero-metrics">
+            <div class="metric-card">
+              <dt class="metric-label">Dual-Runtime Parity</dt>
+              <dd class="metric-value">285 / 285</dd>
+            </div>
+            <div class="metric-card">
+              <dt class="metric-label">RPC Dispatch</dt>
+              <dd class="metric-value">201.3 ns</dd>
+            </div>
+            <div class="metric-card">
+              <dt class="metric-label">Typed Registry</dt>
+              <dd class="metric-value">97 APIs</dd>
+            </div>
+            <div class="metric-card">
+              <dt class="metric-label">Bytecode ISA</dt>
+              <dd class="metric-value">52 Opcodes</dd>
+            </div>
+          </dl>
+        </div>
+
+        <aside class="code-panel" aria-label="Interactive quick-try runner">
+          <div class="code-panel-bar">
+            <div class="hero-preset-bar" role="group" aria-label="Quick-try idioms">
+              <button type="button" class="hero-preset-btn" data-hero-preset="closures" aria-pressed="true">Closures</button>
+              <button type="button" class="hero-preset-btn" data-hero-preset="cow" aria-pressed="false">CoW Safety</button>
+              <button type="button" class="hero-preset-btn" data-hero-preset="cage" aria-pressed="false">Memory Cage</button>
+            </div>
+            <div class="sandbox-actions">
+              <button type="button" class="btn btn-run" id="hero-run-btn">Run</button>
+              <a class="btn btn-dark-ghost" href="#playground" id="hero-open-studio">Edit in Studio</a>
+            </div>
+          </div>
+
+          <pre class="code-block" id="hero-code-preview" tabindex="0"><code><span class="tok-kw">function</span> makeCounter(start, step) {
+  <span class="tok-kw">var</span> value = start;
+  <span class="tok-kw">return</span> <span class="tok-kw">function</span>() {
+    <span class="tok-kw">var</span> current = value;
+    value += step;
+    <span class="tok-kw">return</span> current;
+  };
+}
+
+<span class="tok-kw">var</span> nextId = makeCounter(<span class="tok-num">100</span>, <span class="tok-num">10</span>);
+<span class="tok-kw">var</span> ids = <span class="tok-fn">arrayMap</span>([<span class="tok-num">0</span>, <span class="tok-num">0</span>, <span class="tok-num">0</span>], <span class="tok-kw">function</span>(_) {
+  <span class="tok-kw">return</span> nextId();
+});
+<span class="tok-kw">print</span>(<span class="tok-str">"ids: "</span> + <span class="tok-fn">jsonStringify</span>(ids));</code></pre>
+
+          <div class="output-block" id="hero-output" data-stage="ok">
+            <span class="output-label">$ pulsar run · live browser runtime</span>ids: [100,110,120]</div>
+
+          <div class="telemetry-strip">
+            <div class="telemetry-pills">
+              <span class="telemetry-pill" id="hero-status-pill">Status: OK</span>
+              <span class="telemetry-pill" id="hero-steps-pill">Steps: 17</span>
+              <span class="telemetry-pill" id="hero-time-pill">0.8 ms</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="band" id="playground">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Live Compiler &amp; Bytecode v3 Studio</span>
+          <h2>Edit code, toggle host capabilities, test the cage live.</h2>
+          <p class="lead">
+            Every keystroke runs against PulsarScript's real browser-bundled compiler, static analyzer, Bytecode v3 emitter, and sandboxed interpreter—under hard step, string, and memory caps.
+          </p>
+        </div>
+
+        <div class="tabs" id="studio-root">
+          <div class="tablist" id="studio-presets" role="group" aria-label="Language &amp; sandbox presets">
+            <button type="button" class="filter-btn" data-preset="closures" aria-pressed="true">Closures</button>
+            <button type="button" class="filter-btn" data-preset="cow" aria-pressed="false">CoW Values</button>
+            <button type="button" class="filter-btn" data-preset="strings" aria-pressed="false">Templates &amp; Sort</button>
+            <button type="button" class="filter-btn" data-preset="syntax" aria-pressed="false">JSON &amp; Dates</button>
+            <button type="button" class="filter-btn" data-preset="events" aria-pressed="false">Capability Gate</button>
+            <button type="button" class="filter-btn" data-preset="cage" aria-pressed="false">Memory Cage</button>
+            <button type="button" class="filter-btn" data-preset="modules" aria-pressed="false">Modules &amp; RPC</button>
+          </div>
+
+          <div class="studio-surface">
+            <div class="studio-head">
+              <div>
+                <h3 id="studio-title">Closures &amp; Upvalues</h3>
+                <p class="lead" id="studio-summary">
+                  First-class functions capture enclosing locals as Lua-style shared upvalues compiled to CLOSURE, GET_UPVALUE, SET_UPVALUE, and CLOSE_UPVALUE.
+                </p>
+              </div>
+              <div class="cap-bar" role="group" aria-label="Host manifest capability gates">
+                <span class="cap-bar-label">Capabilities:</span>
+                <button type="button" class="cap-toggle" data-cap-toggle="fs.read" aria-pressed="true">fs.read <span class="cap-state">ON</span></button>
+                <button type="button" class="cap-toggle" data-cap-toggle="fs.write" aria-pressed="true">fs.write <span class="cap-state">ON</span></button>
+                <button type="button" class="cap-toggle" data-cap-toggle="kv" aria-pressed="true">kv <span class="cap-state">ON</span></button>
+                <button type="button" class="cap-toggle" data-cap-toggle="events" aria-pressed="true">events <span class="cap-state">ON</span></button>
+              </div>
+            </div>
+
+            <div class="showcase-split">
+              <div class="code-panel">
+                <div class="code-panel-bar">
+                  <label for="sandbox-code" class="code-panel-title">
+                    <span class="pulse-dot" aria-hidden="true"></span>
+                    <span id="studio-file-label">sandbox.puls (editable · Cmd/Ctrl+Enter)</span>
+                  </label>
+                  <div class="sandbox-actions">
+                    <button type="button" class="btn btn-run" id="studio-run-btn">Run</button>
+                    <button type="button" class="btn btn-dark-ghost" id="studio-reset-btn">Reset</button>
+                    <span class="copy-wrap">
+                      <button type="button" class="copy-button" command="--copy" commandfor="sandbox-code">
+                        <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Copy</span>
+                        <span class="visually-hidden">Sandbox editor source</span>
+                      </button>
+                      <span class="copy-tip" role="status"></span>
+                    </span>
+                  </div>
+                </div>
+                <div class="sandbox-editor-wrap">
+                  <textarea id="sandbox-code" class="sandbox-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">function makeCounter(start, step) {
+  var value = start;
+  return function() {
+    var current = value;
+    value += step;
+    return current;
+  };
+}
+
+var nextId = makeCounter(100, 10);
+var ids = arrayMap([0, 0, 0], function(_) {
+  return nextId();
+});
+
+print("ids: " + jsonStringify(ids));
+print("type: " + typeOf(nextId) + " -> " + string(nextId));</textarea>
+                </div>
+              </div>
+
+              <div class="studio-stack">
+                <div class="code-panel">
+                  <div class="code-panel-bar">
+                    <span class="code-panel-title">Runtime Output &amp; Sandbox Telemetry</span>
+                    <span class="stage-badge" id="studio-stage-badge" data-ok="true">OK</span>
+                  </div>
+                  <div class="output-block" id="studio-output" data-stage="ok">
+                    <span class="output-label">Stdout / Host Result</span>ids: [100,110,120]
+type: function -&gt; &lt;fn anonymous&gt;</div>
+                  <div class="budget-meters">
+                    <div class="meter-item">
+                      <div class="meter-head">
+                        <span>Step Budget</span>
+                        <span id="studio-steps-text" class="mono-num">17 / 50,000</span>
+                      </div>
+                      <progress id="studio-steps-bar" class="budget-progress" max="50000" value="17" aria-label="Step budget usage"></progress>
+                    </div>
+                    <div class="meter-item">
+                      <div class="meter-head">
+                        <span>Live Heap</span>
+                        <span id="studio-mem-text" class="mono-num">0.2 KiB / 2 MiB</span>
+                      </div>
+                      <progress id="studio-mem-bar" class="budget-progress" max="2097152" value="256" aria-label="Memory budget usage"></progress>
+                    </div>
+                  </div>
+                  <span class="visually-hidden" id="studio-live-status" role="status"></span>
+                </div>
+
+                <div class="code-panel">
+                  <div class="code-panel-bar">
+                    <span class="code-panel-title">Compiled Bytecode v3</span>
+                    <span id="studio-bc-meta">96 words · 13 constants · 3 fn</span>
+                  </div>
+                  <pre class="code-block" id="studio-disasm" tabindex="0"><code>  0000: JUMP            32  ; line 1
+; fn makeCounter (arity=2, locals=3) @ 0002
+  0002: GET_LOCAL       0  ; line 2
+  0004: SET_LOCAL       2  ; line 2</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="why">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Why PulsarScript</span>
+          <h2>Predictable like a spec. Contained like a kernel.</h2>
+          <p class="lead">
+            Engineered specifically for embedding third-party PulsarOS app logic where untrusted scripts share host resources with real users.
+          </p>
+        </div>
+
+        <div class="pillars-grid">
+          <article class="card">
+            <span class="card-tag">RPC Handlers</span>
+            <h3>Sub-microsecond Dispatch</h3>
+            <p>Expose <code>registerHandler(name, fn)</code> entrypoints from app bundles. Hot dispatch runs in 201.3 ns with 0 heap allocations inside a 250,000-step / 1.5 s cage.</p>
+          </article>
+          <article class="card">
+            <span class="card-tag">Background Services</span>
+            <h3>Event-Driven Watchers</h3>
+            <p>Long-lived workers subscribe via <code>on(event, fn)</code> and suspend without polling using <code>yield</code>, <code>sleep</code>, and async <code>ErrSuspended</code> host calls.</p>
+          </article>
+          <article class="card">
+            <span class="card-tag">Go Host VM</span>
+            <h3>Capability-Gated I/O</h3>
+            <p>No filesystem, KV, window channel, or IPC socket exists by default. Hosts inject only the capabilities declared by the app manifest and check every call.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="architecture">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Compiler &amp; VM Pipeline</span>
+          <h2>Four gates between source text and execution.</h2>
+          <p class="lead">
+            Unknown functions, circular imports, invalid opcodes, stale SHA-256 bundles, and runaway allocations fail loudly before touching user data.
+          </p>
+        </div>
+
+        <ol class="pipeline">
+          <li class="pipeline-step">
+            <span class="step-index">01 · LINK &amp; PARSE</span>
+            <h3>Relative Modules</h3>
+            <p><code>Linker.ts</code> resolves <code>import</code>/<code>export</code> graphs into one flat AST, rejecting circular imports at compile time.</p>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-index">02 · ANALYZE</span>
+            <h3>Static Checks</h3>
+            <p>Validates scoping, arity against <code>hostapi.json</code>, duplicate declarations, and unreachable code with line/column diagnostics.</p>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-index">03 · VERIFY</span>
+            <h3>Bytecode v3 + Hash</h3>
+            <p>Emits portable JSON bytecode (52 opcodes, loads v0–v3) with a SHA-256 <code>sourceHash</code>. Go <code>VerifyModule</code> rejects malformed chunks before execution.</p>
+          </li>
+          <li class="pipeline-step">
+            <span class="step-index">04 · ENFORCE</span>
+            <h3>CoW VM &amp; Capabilities</h3>
+            <p>Copy-on-Write persistence preserves D15 value snapshots while budgets unwind uncatchably through <code>try/catch</code>.</p>
+          </li>
+        </ol>
+
+        <div tabindex="0" role="region" aria-labelledby="budgets-caption" class="table-wrapper">
+          <table>
+            <caption id="budgets-caption">Hard Execution &amp; Memory Budgets by Runtime Mode (vm/vm.go)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Profile</th>
+                <th scope="col">Step Cap</th>
+                <th scope="col">Wall Time</th>
+                <th scope="col">Max String</th>
+                <th scope="col">Max Elements</th>
+                <th scope="col">Live Memory / Heap</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>RPCVMConfig()</code></th>
+                <td data-label="Step Cap" class="mono-num">250,000 steps</td>
+                <td data-label="Wall Time" class="mono-num">1,500 ms</td>
+                <td data-label="Max String" class="mono-num">1 MiB</td>
+                <td data-label="Max Elements" class="mono-num">100,000</td>
+                <td data-label="Live Memory / Heap" class="mono-num">16 MiB / 250k objects</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>ServiceVMConfig()</code></th>
+                <td data-label="Step Cap" class="mono-num">10,000,000 steps</td>
+                <td data-label="Wall Time" class="mono-num">10 s</td>
+                <td data-label="Max String" class="mono-num">4 MiB</td>
+                <td data-label="Max Elements" class="mono-num">100,000</td>
+                <td data-label="Live Memory / Heap" class="mono-num">64 MiB / 500k objects</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>DefaultVMConfig()</code></th>
+                <td data-label="Step Cap" class="mono-num">10,000,000 steps</td>
+                <td data-label="Wall Time" class="mono-num">10 s</td>
+                <td data-label="Max String" class="mono-num">16 MiB</td>
+                <td data-label="Max Elements" class="mono-num">1,000,000</td>
+                <td data-label="Live Memory / Heap" class="mono-num">256 MiB / 1M objects</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="benchmarks">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Measured Performance · Apple M1 Pro</span>
+          <h2>Linear CoW updates replace quadratic copies.</h2>
+          <p class="lead">
+            All numbers below come directly from <code>vm/bench_test.go</code> on Apple M1 Pro alongside pre-v1.0 quadratic measurements.
+          </p>
+        </div>
+
+        <figure class="bench-figure">
+          <div class="bench-bars">
+            <div class="bench-item">
+              <div class="bench-item-head">
+                <span>20,000 Array Appends (<code>a[len(a)] = i</code>)</span>
+                <span class="bench-speedup">~205× faster · 2,200 ms → 10.72 ms</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-row">
+                  <span>Pre-v1.0 copy</span>
+                  <div class="bar-fill bar-before" aria-hidden="true"></div>
+                  <span>2,200 ms</span>
+                </div>
+                <div class="bar-row">
+                  <span>v1.2 CoW</span>
+                  <div class="bar-fill bar-after" style="--bar-pct: 2%;" aria-hidden="true"></div>
+                  <span>10.72 ms</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bench-item">
+              <div class="bench-item-head">
+                <span>10,000 Object Key Writes (<code>o[k] = v</code>)</span>
+                <span class="bench-speedup">~476× faster · 2,900 ms → 6.09 ms</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-row">
+                  <span>Pre-v1.0 copy</span>
+                  <div class="bar-fill bar-before" aria-hidden="true"></div>
+                  <span>2,900 ms</span>
+                </div>
+                <div class="bar-row">
+                  <span>v1.2 CoW</span>
+                  <div class="bar-fill bar-after" style="--bar-pct: 1.5%;" aria-hidden="true"></div>
+                  <span>6.09 ms</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption>
+            Copy-on-Write persistence eliminates whole-container clones inside loops while keeping D15 value-snapshot semantics intact.
+          </figcaption>
+        </figure>
+
+        <div tabindex="0" role="region" aria-labelledby="bench-table-caption" class="table-wrapper">
+          <table>
+            <caption id="bench-table-caption">Go VM Benchmark Suite Results (vm/bench_test.go · Apple M1 Pro)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Benchmark</th>
+                <th scope="col">Measured Time / Op</th>
+                <th scope="col">Allocations / Footnote</th>
+                <th scope="col">What It Verifies</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>BenchmarkHandlerDispatch</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">201.3 ns/op</td>
+                <td data-label="Allocations / Footnote" class="mono-num">0 B/op · 0 allocs/op</td>
+                <td data-label="What It Verifies">Hot RPC closure dispatch cost without per-call heap allocations.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkFileManagerListSort</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">0.51 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">133.4 steps/entry</td>
+                <td data-label="What It Verifies">200-entry directory sort well below the 140 steps/entry target inside RPC budget.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkArrayBuild20k</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">10.72 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">CoW persistent array</td>
+                <td data-label="What It Verifies">Down from 2.2 s quadratic copies; clears 1.5 s RPC time budget easily.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkObjectBuild10k</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">6.09 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">RPCVMConfig() pass</td>
+                <td data-label="What It Verifies">10k dynamic object keys pass both step (250k) and wall-time RPC limits.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkStringWalk50k</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">10.09 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">14 allocs (51k UTF-8: 10.8 ms)</td>
+                <td data-label="What It Verifies">Sequential code-point indexing via O(1) cursor cache in VM string lookup.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkFib20</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">2.47 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">Recursive call frames</td>
+                <td data-label="What It Verifies">21,891 recursive call frames within the 256-frame depth stack.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkTightLoop10k</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">1.57 ms</td>
+                <td data-label="Allocations / Footnote" class="mono-num">RPCVMConfig() pass</td>
+                <td data-label="What It Verifies">Interpreter loop dispatch throughput across 10,000 iterations.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>BenchmarkStringBuild</code></th>
+                <td data-label="Measured Time / Op" class="mono-num">248 µs</td>
+                <td data-label="Allocations / Footnote" class="mono-num">1,000 concats</td>
+                <td data-label="What It Verifies">Byte-limit accounted string concatenation under RPC limits.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="api">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Single Source of Truth · vm/hostapi.json</span>
+          <h2>Standard Library &amp; Host API Explorer</h2>
+          <p class="lead">
+            All 97 functions are shared identically by the compiler, static analyzer, TypeScript interpreter, and Go VM—77 pure core built-ins and 20 capability-gated PulsarOS host calls.
+          </p>
+        </div>
+
+        <div class="api-controls">
+          <div class="api-top-row">
+            <div class="search-field">
+              <label for="api-search">Filter by function name, capability, return type, or description</label>
+              <input id="api-search" type="search" placeholder="Try: arraySort, fsRead, ipc, json, math...">
+            </div>
+
+            <div>
+              <div class="filter-group" role="group" aria-label="Filter by provider">
+                <button type="button" class="filter-btn" data-provider="all" aria-pressed="true">All (97)</button>
+                <button type="button" class="filter-btn" data-provider="core" aria-pressed="false">Core (77)</button>
+                <button type="button" class="filter-btn" data-provider="host" aria-pressed="false">Host (20)</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="filter-group" id="capability-filters" role="group" aria-label="Filter by host capability">
+            <button type="button" class="filter-btn" data-cap="all" aria-pressed="true">All capabilities</button>
+            <button type="button" class="filter-btn" data-cap="fs.read" aria-pressed="false">fs.read</button>
+            <button type="button" class="filter-btn" data-cap="fs.write" aria-pressed="false">fs.write</button>
+            <button type="button" class="filter-btn" data-cap="kv" aria-pressed="false">kv</button>
+            <button type="button" class="filter-btn" data-cap="events" aria-pressed="false">events</button>
+            <button type="button" class="filter-btn" data-cap="window" aria-pressed="false">window</button>
+            <button type="button" class="filter-btn" data-cap="ipc" aria-pressed="false">ipc</button>
+          </div>
+        </div>
+
+        <div class="api-meta-bar">
+          <span id="api-visible-count">Showing 97 of 97 functions</span>
+          <span class="visually-hidden" id="api-live-status" role="status"></span>
+          <button type="button" class="btn btn-secondary" id="api-reset-btn" hidden>Reset filters</button>
+        </div>
+
+        <div tabindex="0" role="region" aria-labelledby="api-table-caption" class="table-wrapper">
+          <table>
+            <caption id="api-table-caption">PulsarScript v1.2 Registry Functions (vm/hostapi.json)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Signature</th>
+                <th scope="col">Category</th>
+                <th scope="col">Access</th>
+                <th scope="col">Returns</th>
+                <th scope="col">Behavior</th>
+              </tr>
+            </thead>
+            <tbody id="api-table-body">
+              <tr>
+                <th scope="row"><code>registerHandler(name, handler)</code></th>
+                <td data-label="Category">Events &amp; Runtime</td>
+                <td data-label="Access"><span class="badge badge-core">core</span></td>
+                <td data-label="Returns"><code>nil</code></td>
+                <td data-label="Behavior">Exposes a top-level function or closure value to the host under name.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="empty-state" id="api-empty-state" hidden>
+            <p>No functions match the active search or capability filters.</p>
+            <button type="button" class="btn btn-secondary" id="api-empty-reset">Show all 97 functions</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="quickstart">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Developer Workflow</span>
+          <h2>Compile, inspect, embed, and verify.</h2>
+          <p class="lead">
+            Compile <code>.puls</code> files or module graphs with Bun, inspect bundles on <code>vmrun</code>, or embed <code>github.com/PulsarDynamics/pulsarscript/vm</code> directly in Go.
+          </p>
+        </div>
+
+        <div class="tabs" data-tabs="quickstart">
+          <div class="tablist" focusgroup="tablist nomemory" aria-label="Quickstart workflows">
+            <button type="button" role="tab" id="qs-tab-cli" aria-selected="true" focusgroupstart>CLI Compile &amp; Run</button>
+            <button type="button" role="tab" id="qs-tab-go" aria-selected="false" tabindex="-1">Embed Go VM</button>
+            <button type="button" role="tab" id="qs-tab-test" aria-selected="false" tabindex="-1">Verify &amp; Fuzz</button>
+          </div>
+
+          <div class="tab-panels">
+            <div role="tabpanel" id="qs-panel-cli" aria-labelledby="qs-tab-cli">
+              <div class="panel-surface">
+                <div class="code-panel">
+                  <div class="code-panel-bar">
+                    <span class="code-panel-title">TypeScript Compiler + Go VM Runner</span>
+                    <span class="copy-wrap">
+                      <button type="button" class="copy-button" command="--copy" commandfor="qs-code-cli">
+                        <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Copy</span>
+                        <span class="visually-hidden">CLI workflow commands</span>
+                      </button>
+                      <span class="copy-tip" role="status"></span>
+                    </span>
+                  </div>
+                  <pre class="code-block" id="qs-code-cli" tabindex="0"><code><span class="tok-cmt"># 1. Compile source (with linked imports &amp; source map)</span>
+bun run compile.ts -s examples/file-manager-reference.puls out.json
+
+<span class="tok-cmt"># 2. Disassemble, inspect handlers, or run under budgets</span>
+cd vm &amp;&amp; go run ./cmd/vmrun -disasm ../out.json
+cd vm &amp;&amp; go run ./cmd/vmrun -inspect ../out.json
+cd vm &amp;&amp; go run ./cmd/vmrun ../out.json
+
+<span class="tok-cmt"># 3. Interactive REPL</span>
+bun run repl</code></pre>
+                </div>
+              </div>
+            </div>
+
+            <div role="tabpanel" id="qs-panel-go" aria-labelledby="qs-tab-go" hidden="until-found">
+              <div class="panel-surface">
+                <div class="code-panel">
+                  <div class="code-panel-bar">
+                    <span class="code-panel-title">Go Host Integration (github.com/PulsarDynamics/pulsarscript/vm)</span>
+                    <span class="copy-wrap">
+                      <button type="button" class="copy-button" command="--copy" commandfor="qs-code-go">
+                        <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Copy</span>
+                        <span class="visually-hidden">Go embedding example</span>
+                      </button>
+                      <span class="copy-tip" role="status"></span>
+                    </span>
+                  </div>
+                  <pre class="code-block" id="qs-code-go" tabindex="0"><code>mod, err := vm.LoadModule(bytecodeBytes)
+if err != nil {
+    return err
+}
+
+machine := vm.NewVMWithConfig(mod, vm.HostCallbacks{
+    Print: func(v vm.Value) { log.Println(v.String()) },
+    HostCall: myCapabilityCheckedDispatcher,
+}, vm.RPCVMConfig())
+
+if err := machine.Run(); err != nil {
+    return err
+}
+result, err := machine.DispatchHandler("listSorted", []vm.Value{
+    vm.String("/docs"), vm.String("name"), vm.Bool(true),
+})</code></pre>
+                </div>
+              </div>
+            </div>
+
+            <div role="tabpanel" id="qs-panel-test" aria-labelledby="qs-tab-test" hidden="until-found">
+              <div class="panel-surface">
+                <div class="code-panel">
+                  <div class="code-panel-bar">
+                    <span class="code-panel-title">Full Dual-Runtime Verification</span>
+                    <span class="copy-wrap">
+                      <button type="button" class="copy-button" command="--copy" commandfor="qs-code-test">
+                        <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Copy</span>
+                        <span class="visually-hidden">Verification commands</span>
+                      </button>
+                      <span class="copy-tip" role="status"></span>
+                    </span>
+                  </div>
+                  <pre class="code-block" id="qs-code-test" tabindex="0"><code><span class="tok-cmt"># Typecheck + Unit + Parser/Compiler Fuzz Suite (82 tests)</span>
+bun run typecheck &amp;&amp; bun test
+
+<span class="tok-cmt"># 285-case Dual-Runtime Conformance Suite (TS Interp + Go VM)</span>
+bun run conformance
+
+<span class="tok-cmt"># Go VM with race detector + Benchmarks + Fuzzing</span>
+cd vm &amp;&amp; go test -count=1 -race ./...
+cd vm &amp;&amp; go test -bench=. -benchmem ./...
+cd vm &amp;&amp; go test -fuzz=FuzzLoadModuleAndRun -fuzztime=30s</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band reveal" id="roadmap">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Release Completeness · Gate Status</span>
+          <h2>v1.2 Language &amp; VM Complete — What's Next?</h2>
+          <p class="lead">
+            All core language, runtime, standard library, and hardening deliverables (<code>LANG-01</code>–<code>LANG-18</code>, excluding <code>LANG-16</code>) are complete and verified. Remaining planned items sit cleanly in optional Gate G6 developer tooling.
+          </p>
+        </div>
+
+        <div class="accordion-controls">
+          <button type="button" class="btn btn-secondary" commandfor="roadmap-accordion" command="--toggle-all" aria-expanded="false">
+            <span class="expand">Expand all</span>
+            <span class="collapse">Collapse all</span>
+          </button>
+        </div>
+
+        <div class="accordion" id="roadmap-accordion">
+          <details class="roadmap-item" open>
+            <summary>Gate G6 — Optional Developer Tooling (DX-01 to DX-07)</summary>
+            <div class="accordion-body">
+              <p>These tooling enhancements build on the finished v1.2 compiler and registry without changing language semantics:</p>
+              <ul class="dx-list">
+                <li><span class="dx-id">DX-01 · fruit fmt</span> — AST formatter preserving comments and blank lines idempotently across the codebase.</li>
+                <li><span class="dx-id">DX-02 · fruit lint</span> — Static lints for unused bindings, shadowing, unknown host calls, and <code>AppManifest.json</code> capability mismatches.</li>
+                <li><span class="dx-id">DX-03 · LSP &amp; VS Code</span> — Language Server diagnostics, hover docs, and completions generated directly from <code>vm/hostapi.json</code>.</li>
+                <li><span class="dx-id">DX-04 · Go VM on WASM</span> — Compile the Go VM to WebAssembly for browser Script Studio execution (unlocking later retirement of the TypeScript interpreter in <code>LANG-16</code>).</li>
+                <li><span class="dx-id">DX-05 · Breakpoint Debugger</span> — Line-map breakpoints, single-step inspection of locals/upvalues, and paused budget meters in Script Studio.</li>
+                <li><span class="dx-id">DX-06 · Generated Release Docs</span> — Multi-page docs builder generated automatically from <code>SPEC.md</code>, <code>hostapi.json</code>, and conformance cases.</li>
+                <li><span class="dx-id">DX-07 · fruit dev Workbench</span> — Local mock-host iframe + Go VM live-reload harness and <code>fruit create</code> app templates inside <code>pulsaros-api</code>.</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="roadmap-item">
+            <summary>Deliberate Language Boundaries in SPEC v1.0</summary>
+            <div class="accordion-body">
+              <p>Several C-family constructs are intentionally excluded by <code>SPEC.md</code> to keep the compiler, analyzer, and Go VM compact and unambiguous:</p>
+              <ul class="dx-list">
+                <li>No <code>++</code> / <code>--</code>, <code>switch</code>, or <code>do…while</code> — use <code>+= 1</code>, chained <code>if/else</code> or ternaries <code>?:</code>, and <code>while</code> / <code>for…of</code>.</li>
+                <li>Only <code>nil</code> and <code>false</code> are falsy — <code>0</code> and <code>""</code> are truthy under §3.1.</li>
+                <li>Every assignment has D15 value-snapshot semantics backed by CoW containers in the VM; shared state is mutated intentionally via variables or captured closure upvalues.</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="roadmap-item">
+            <summary>Compatibility &amp; Deprecation Policy (SPEC §10)</summary>
+            <div class="accordion-body">
+              <p>The Go VM maintains backward load compatibility for versions <code>N</code> and <code>N−1</code> (currently supporting Bytecode formats v0, v1, v2, and v3 simultaneously in <code>vm.LoadModule</code>), and enforces structured host-call metadata via <code>vm/hostapi.json</code>.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="./pulsar-logo.png" alt="" width="34" height="34" class="logo-img">
+        <div>
+          <strong>PulsarScript v1.2.0</strong> · SPEC v1.0 · Bytecode v3 · Go module <code>github.com/PulsarDynamics/pulsarscript/vm</code>
+        </div>
+      </div>
+      <ul class="footer-links">
+        <li><a href="../SPEC.md">SPEC.md</a></li>
+        <li><a href="../QUICK_REFERENCE.md">QUICK_REFERENCE.md</a></li>
+        <li><a href="../vm/hostapi.json">vm/hostapi.json</a></li>
+        <li><a href="../examples/file-manager-reference.puls">file-manager-reference.puls</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>
