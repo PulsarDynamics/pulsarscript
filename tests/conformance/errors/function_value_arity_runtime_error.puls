@@ -1,0 +1,7 @@
+function f(a, b) { return a + b; }
+var g = f;
+try {
+  print(g(1));
+} catch (e) {
+  print(e.kind);
+}

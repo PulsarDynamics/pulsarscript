@@ -30,7 +30,7 @@ func TestLoadModuleWithoutHeaderIsVersion0(t *testing.T) {
 
 func TestLoadModuleRejectsUnknownFormatOrVersion(t *testing.T) {
 	cases := map[string]string{
-		`{"format":"pulsarscript-bytecode","version":3,` + body + `}`:  "bytecode version 3 is not supported",
+		`{"format":"pulsarscript-bytecode","version":4,` + body + `}`:  "bytecode version 4 is not supported",
 		`{"format":"pulsarscript-bytecode","version":-1,` + body + `}`: "bytecode version -1 is not supported",
 		`{"format":"pulsarscript-bytecode",` + body + `}`:              "bytecode version 0 is not supported",
 		`{"format":"something-else","version":1,` + body + `}`:         "not PulsarScript bytecode",

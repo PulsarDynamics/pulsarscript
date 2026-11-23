@@ -1,0 +1,5 @@
+var s = "\u{1F600}\u{10FFFF}";
+print(len(s));
+print(s[0] == "\u{1F600}");
+print(s[1] == "\u{10FFFF}");
+

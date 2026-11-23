@@ -1,10 +1,12 @@
 import type { BreakStmt } from "../classes/BreakStmt";
+import type { ExportStmt } from "../classes/ExportStmt";
 import type { ForOfStmt } from "../classes/ForOfStmt";
 import type { BlockStmt } from "../classes/BlockStmt";
 import type { ExpressionStmt } from "../classes/ExpressionStmt";
 import type { ForStmt } from "../classes/ForStmt";
 import type { FunctionStmt } from "../classes/FunctionStmt";
 import type { IfStmt } from "../classes/IfStmt";
+import type { ImportStmt } from "../classes/ImportStmt";
 import type { PrintStmt } from "../classes/PrintStmt";
 import type { ReturnStmt } from "../classes/ReturnStmt";
 import type { TryCatchStmt } from "../classes/TryCatchStmt";
@@ -24,4 +26,6 @@ export interface StmtVisitor<R> {
     visitTryCatchStmt(stmt: TryCatchStmt): R;
     visitBreakStmt(stmt: BreakStmt): R;
     visitForOfStmt(stmt: ForOfStmt): R;
+    visitImportStmt(stmt: ImportStmt): R;
+    visitExportStmt(stmt: ExportStmt): R;
   }

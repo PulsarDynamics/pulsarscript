@@ -2,7 +2,7 @@
 
 23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
 
-This is the work breakdown behind the master plan (Doc 00): 71 committed items, 108 developer-days, grouped by gate. Each item is one reviewable PR unless its row says otherwise. Estimates are single-developer days and are this plan's own; where the project docs already gave a figure, the Source column names it and Doc 00 compares the totals.
+This is the work breakdown behind the master plan (Doc 00): 78 committed items, 122 developer-days, grouped by gate. Each item is one reviewable PR unless its row says otherwise. Estimates are single-developer days and are this plan's own; where the project docs already gave a figure, the Source column names it and Doc 00 compares the totals.
 
 **How to read the table**
 
@@ -17,15 +17,15 @@ This is the work breakdown behind the master plan (Doc 00): 71 committed items, 
 | G0 | Safe to merge the installable-app PRs | 5 | 4.5 |
 | G1 | API auth sweep | 10 | 5.5 |
 | G2 | Deployable | 11 | 11.75 |
-| G3 | App platform proven in a real browser | 10 | 14 |
-| G4 | Language 1.0 | 5 | 12 |
-| G5 | Runtime and standard library | 5 | 14 |
-| G6 | Developer tooling | 6 | 15 |
-| G7 | Hardening and performance | 6 | 9.75 |
+| G3 | App platform proven in a real browser | 12 | 16 |
+| G4 | Language 1.0 | 7 | 16 |
+| G5 | Runtime, standard library and file grants | 7 | 20 |
+| G6 | Developer tooling | 7 | 18 |
+| G7 | Hardening and performance | 6 | 8.75 |
 | HT | Health track (about one day a week) | 13 | 21.5 |
-| **Total** | | **71** | **108** |
+| **Total** | | **78** | **122** |
 
-Four more items are listed under *Later* and are not in the total.
+Five more items are listed under *Later* and are not in the total.
 
 ## G0 — Safe to merge (4.5 d)
 
@@ -68,7 +68,7 @@ Four more items are listed under *Later* and are not in the total.
 | LANG-02 | Fuzz `LoadModule`, `VerifyModule` and run-with-budget; nightly CI job | Phase 6, Analysis rec. 5 | PulsarScript | 1 | LANG-01 | One hour of fuzzing: no panic, no budget or memory escape |
 | REL-01 | Remove tracked generated files and clutter in both PulsarOS repos; archive root-level planning files; fix `.gitmodules` and `CLAUDE.md`; drop unused dependencies and dead code | L2, L20–L23 | API, frontend | 1 | | Repo roots hold only code, config and current docs |
 
-## G3 — App platform proven in a real browser (14 d)
+## G3 — App platform proven in a real browser (16 d)
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -81,9 +81,11 @@ Four more items are listed under *Later* and are not in the total.
 | FE-03 | Write user CSS through `textContent` instead of `{@html}` | F4 | Frontend | 0.5 | | `</style><img onerror>` in user CSS renders no element |
 | FE-04 | One sanitizer; drop `style`; add `rel="noopener noreferrer"`; audit the remaining `{@html}` sinks | F5 | Frontend | 0.5 | | One sanitizer module is imported everywhere; unit tests cover each sink |
 | FE-05 | Fix or delete the 17 components that do not compile; make `Button` forward `on:click`; shrink the ESLint ignore list | F13 | Frontend | 1.5 | | `svelte-check` parses every file in `src/lib/Components` |
-| APP-05 | In-OS developer console: per-app script logs, VM list, errors with source line and snippet | Phase 4 | Frontend, API | 3 | APP-01 | A handler error in an installed app shows its `.puls` line in the console |
+| APP-05 | In-OS developer console: per-app script logs, VM list, errors with source line and snippet, plus bounded iframe UI `console.*` and error forwarding (`update-fruit-dev-workbench`) | Phase 4, N8 | Frontend, API | 3.5 | APP-01 | A handler error shows its `.puls` line and an uncaught iframe error appears in the console |
+| APP-10 | Theme `scheme` (`light`\|`dark`) in `themeSnapshot`/SDK and confirmed `Pulsar.os.openUrl(url)` (`add-app-sdk-theme-and-urls`) | N7, A25 | Frontend | 1 | APP-01 | Light-theme checkboxes render light; confirming `openUrl` launches Web Browser and cancelling resolves `false` |
+| FE-16 | App Store details fix: populate long description, bundle size, updated time, screenshots and verified badge; read `.pulsar` `script.handlers` instead of legacy `script.exports` | L24 | Frontend, API | 0.5 | APP-01 | An installed `.pulsar` app's details modal displays its metadata, screenshots and script handlers |
 
-## G4 — Language 1.0 (12 d)
+## G4 — Language 1.0 (16 d)
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -91,19 +93,23 @@ Four more items are listed under *Later* and are not in the total.
 | LANG-04 | Template literals `` `Hi ${name}` `` | Phase 2 | PulsarScript | 1.5 | LANG-03 | Conformance cases including nesting and escapes |
 | LANG-05 | Closures: anonymous functions and captured variables (upvalues); bytecode v3; interpreter parity | Phase 2, A6 | PulsarScript | 6 | LANG-01 | Counter, callback and nested-capture cases pass on both runtimes; v0–v2 bundles still load |
 | LANG-06 | Compile errors for unreachable code, duplicate declarations and wrong arity; column numbers; stack in runtime errors | Phase 2, Analysis | PulsarScript | 1.5 | | Each error kind has a conformance case with line and column |
-| LANG-08 | `SPEC.md` v1.0; at least 250 conformance cases; loader tests with stored v0, v1 and v2 bundles; benchmark baseline recorded | Phase 2 exit | PulsarScript | 2 | LANG-03, LANG-04, LANG-05, LANG-06 | Phase 2 exit criteria met in CI; `v1.0.0` tagged |
+| LANG-17 | Copy-on-write (CoW) collection updates preserving D15 value semantics so array appends and object key writes scale linearly instead of copying the whole value | N5, A23, split from LANG-07 | PulsarScript | 2 | LANG-01 | 20,000 appends and 10,000 object key sets run inside RPC time/step budgets; aliasing conformance cases pass on both runtimes |
+| LANG-18 | String comparison (`<`, `<=`, `>`, `>=` by code point), nested non-variable index targets (`o.items[len(o.items)] = i`), and pragmatic v1.0 syntax (`/* */`, `?:`, `1e3`/`0x`, `parseFloat`/`number` parity; `++`/`switch`/`do…while` excluded) | N6, A22 | PulsarScript | 2 | APP-01 | Conformance cases on both runtimes cover string sorting comparisons, nested append, ternary, block comments and exponent/hex literals |
+| LANG-08 | `SPEC.md` v1.0; at least 280 conformance cases; loader tests with stored v0, v1 and v2 bundles; benchmark baseline recorded | Phase 2 exit | PulsarScript | 2 | LANG-03, LANG-04, LANG-05, LANG-06, LANG-17, LANG-18 | Phase 2 exit criteria met in CI; `v1.0.0` tagged |
 
-## G5 — Runtime and standard library (14 d)
+## G5 — Runtime, standard library and file grants (20 d)
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
-| LANG-09 | Standard library through the registry: array (map, filter, reduce, sort, find, slice, join), string, object, JSON parse and stringify, time | Phase 3 | PulsarScript, API | 4 | LANG-05 | Every function has a registry entry, a conformance case and docs |
+| LANG-09 | Standard library through the registry: array (`arrayMap`, `arrayFilter`, `arrayReduce`, `arrayFind`, `arraySort` with optional comparator, `arraySlice`, `arrayJoin`, `arrayIncludes`), string (`split`, `replace`, `startsWith`, `endsWith`, `lastIndexOf`, `indexOf` offset, `padStart`/`padEnd`, `repeat`, `charCodeAt`/`fromCharCode`), object (`objDelete`, `objEntries`, `objMerge`), JSON (`jsonParse`, `jsonStringify`), time (`dateFormat`, `dateParse`), math (trig/log) | Phase 3, N6 | PulsarScript, API | 4.5 | LANG-05, LANG-18 | Every function has a registry entry, a conformance case and docs |
 | LANG-10 | Event model: `on(event, fn)`, `emit`, `sleep(ms)`, `yield`; service scripts run as an event loop | Phase 3 | PulsarScript, API | 3 | LANG-05 | A service wakes on an event without polling and stays inside its budget |
 | LANG-11 | Async host calls: a host call suspends the VM and resumes it with a result; budgets hold across resumes | Phase 3 | PulsarScript, API | 3 | LANG-10 | A slow `fsRead` does not block another VM's call |
 | LANG-12 | Build-time modules: `import { x } from "./util.puls"` linked into one bundle by `fruit build`; cycles rejected | Phase 3, D8 | PulsarScript, API | 3 | LANG-08 | A two-file app builds to one bytecode file; a cycle is a compile error |
 | LANG-13 | Reference script (batch rename plus folder watcher) in RPC and service modes inside default budgets; settle cursor paging against services for long jobs | Phase 3 exit | PulsarScript, API | 1 | LANG-09, LANG-10, LANG-11 | Phase 3 exit criterion met in CI |
+| APP-09 | Scoped file grants (`grant:<handle>`), pickers (`openFile` with `multiple: true` up to 50, `openFolder`, `saveFile`), manifest `fileTypes`, Open / Open with launch (`Pulsar.info.launch`), Settings → Apps revoke list, Markdown Viewer 1.1.0 (`add-app-file-handles`) | N7, A24 | API, Frontend | 4 | APP-03 | Markdown Viewer 1.1.0 opens picked files/folders and launches from `.md` Open with without `fs.user` |
+| APP-11 | Opt-in SDK UI primitives (`pulsar-app-ui.css`) and self-hosted Material Icons route `/v1/apps/sdk/v1/fonts/{file}` (`add-app-sdk-ui-kit`) | N8, A25 | Frontend, API | 1.5 | APP-10 | Apps render toolbars/sidebars/icons under iframe CSP with zero external font requests |
 
-## G6 — Developer tooling (15 d)
+## G6 — Developer tooling (18 d)
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -113,12 +119,13 @@ Four more items are listed under *Later* and are not in the total.
 | DX-04 | Go VM built to WebAssembly; Script Studio app with output, disassembly and budget meters | Phase 5, A1 | PulsarScript, frontend | 4 | LANG-08 | A script runs in the browser with the same output as `vmrun` for the whole conformance suite |
 | DX-05 | Debugger in Script Studio: breakpoints and stepping on line maps | Phase 5 | PulsarScript, frontend | 2 | DX-04 | Stop at a line, inspect locals, step over a call |
 | DX-06 | Docs site generated from `SPEC.md`, the registry and conformance examples; refreshed first-app guide and SDK reference | Phase 5 | PulsarScript, API | 1 | | A developer new to PulsarOS writes, tests and debugs a handler from the docs alone |
+| DX-07 | Local mock-host `fruit dev` workbench (sandboxed iframe, theme/scope toggles, `appfs` fake tree, in-process Go VM with budgets, live reload) and `.pulsar` `fruit create` templates (`update-fruit-dev-workbench`, movable after G3) | N8, A26 | API | 3 | APP-01 | `fruit create my-app --template starter && cd my-app && fruit build` succeeds; `fruit dev` runs `ui/` + `.puls` handlers locally with live reload |
 
-## G7 — Hardening and performance (9.75 d)
+## G7 — Hardening and performance (8.75 d)
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
-| LANG-07 | Performance: avoid whole-value copies on element updates, constant folding, peephole passes, fewer `Value` copies in the VM loop | Phase 6, Analysis | PulsarScript | 3 | LANG-08 | Benchmarks beat the G4 baseline; File Manager Lite uses fewer steps per folder entry than today's 140 |
+| LANG-07 | Performance: constant folding, peephole passes, fewer `Value` copies in the VM loop, faster string indexing (`L25`), building on `LANG-17` CoW | Phase 6, Analysis | PulsarScript | 2 | LANG-08 | Benchmarks beat the G4 baseline; File Manager Lite uses fewer steps per folder entry than today's 140 |
 | LANG-14 | Fuzz the parser and compiler nightly | Phase 6 | PulsarScript | 1 | LANG-02 | No crash in a nightly run |
 | SEC-14 | Security review of the host layer: capabilities, `fs*` path handling, IPC scope, resource caps | Phase 6 | API | 2 | LANG-11 | Every finding is fixed or recorded with a decision |
 | APP-06 | Per-app quotas (CPU time per minute, VM count, key-value size) and telemetry dashboards | Phase 6 | API | 2 | OPS-08 | An app over quota is throttled and the event is visible on a dashboard |
@@ -153,3 +160,4 @@ Scheduled at about one day a week from week 3, in the order below.
 | OPS-09 | Move in-memory state (IPC registry, script VMs, event hub, rate limiters) out of the process | M9 | API | 5 or more | Only when a second replica is needed |
 | LANG-16 | Retire the TypeScript interpreter once the REPL and Script Studio run on the WebAssembly VM | A1 | PulsarScript | 1.5 | After DX-04 has run for one release |
 | APP-08 | SDK design for dragging files out of an app window | Plan Q5 | Frontend | 2 (design only) | After G3, if users ask for it |
+| APP-12 | Desktop integration: app menus, keyboard shortcuts, context menus and persisted window position/size | A25 | Frontend | 3 | After G5, when multi-window/editor apps ask for it |

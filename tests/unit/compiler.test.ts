@@ -29,6 +29,14 @@ const OPERANDS: Partial<Record<Opcode, number>> = {
   [Opcode.TRY_PUSH]: 1,
   [Opcode.NEW_ARRAY]: 1,
   [Opcode.NEW_OBJECT]: 1,
+  [Opcode.INDEX_GET]: 1,
+  [Opcode.INDEX_SET]: 1,
+  [Opcode.FUNC]: 1,
+  [Opcode.CALL_VALUE]: 1,
+  [Opcode.CLOSURE]: 1,
+  [Opcode.GET_UPVALUE]: 1,
+  [Opcode.SET_UPVALUE]: 1,
+  [Opcode.CLOSE_UPVALUE]: 1,
 };
 
 /** Walk the code stream instruction by instruction; throws on an unknown opcode. */
@@ -186,5 +194,13 @@ describe("bytecode header (A5)", () => {
     expect(file.sourceHash).toBe(sourceHash(src));
     expect(file.sourceHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(sourceHash(src + " ")).not.toBe(file.sourceHash);
+  });
+
+  test("event/scheduler built-ins emit dedicated opcodes (LANG-10)", () => {
+    const ops = decode(compile('emit("ping", 1); yield(); sleep(5); pollEvent();\n')).map((i) => i.op);
+    expect(ops).toContain(Opcode.EMIT_EVENT);
+    expect(ops).toContain(Opcode.YIELD);
+    expect(ops).toContain(Opcode.SLEEP);
+    expect(ops).toContain(Opcode.POLL_EVENT);
   });
 });

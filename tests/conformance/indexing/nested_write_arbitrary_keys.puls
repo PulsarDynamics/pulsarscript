@@ -1,0 +1,25 @@
+// Nested & compound index assignments accept arbitrary key expressions evaluated once (LANG-18).
+var o = { items: [] };
+for (var i = 0; i < 4; i += 1) {
+  o.items[len(o.items)] = i * 10;
+}
+print(o);
+
+var calls = 0;
+function idx(n) {
+  calls += 1;
+  return n;
+}
+var grid = [[1, 2], [3, 4]];
+grid[idx(1)][idx(0)] += 10;
+print(calls);
+print(grid);
+
+var a = [[1]];
+a[idx(0)][0] = 7;
+print(calls);
+print(a);
+
+var obj = { tags: ["hi"] };
+obj.tags[0] += "!";
+print(obj);

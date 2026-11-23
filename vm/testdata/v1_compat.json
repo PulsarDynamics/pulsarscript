@@ -1,0 +1,10 @@
+{
+  "format": "pulsarscript-bytecode",
+  "version": 1,
+  "compiler": "pulsarscript 0.4.0",
+  "sourceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "constants": ["compat-v1", 10, 32],
+  "code": [0, 0, 13, 0, 1, 0, 2, 1, 13, 24],
+  "functions": [],
+  "lineMap": [1, 1, 1, 2, 2, 2, 2, 2, 2, 1]
+}

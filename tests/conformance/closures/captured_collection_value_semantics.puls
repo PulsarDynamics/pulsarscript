@@ -1,0 +1,8 @@
+function test() {
+  var orig = {items: [1, 2]};
+  var snap = orig;
+  var mutate = function() { orig.items[0] = 99; };
+  mutate();
+  return [orig.items[0], snap.items[0]];
+}
+print(test());

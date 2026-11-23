@@ -1,0 +1,8 @@
+function make() { return function() { return 1; }; }
+var a = make();
+var b = make();
+print(a == a);
+print(a == b);
+print(typeOf(a));
+print(!!a);
+print(len(string(a)) > 0);

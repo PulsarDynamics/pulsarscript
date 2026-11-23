@@ -1,0 +1,1 @@
+print(`tick=\`, dollar=\$, plain=$x, nl=[\n\t\\], u=\u{41}\u{1F600}`);

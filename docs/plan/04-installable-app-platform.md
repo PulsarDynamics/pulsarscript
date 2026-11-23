@@ -2,11 +2,11 @@
 
 23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
 
-The installable-app platform is built and in review, but it has never run in a real browser and one data-leak path is open. This doc covers what happens after the File Manager plan's milestones M0–M7: merging the three PRs safely (G0), proving the platform in Chromium and Firefox and closing the leak (G3, 14 days with the frontend fixes that share the gate), and what must be true before anyone but an admin may publish. IDs refer to Doc 01 and Doc 08.
+The installable-app platform is built and merged across the default branches (plus the Markdown Viewer example in `pulsaros-api#60`), but it has never run in a real browser and one data-leak path is open. This doc covers completing the merge train (`L5` VM tag pin), proving the platform in Chromium and Firefox, closing the leak, adding theme scheme/`os.openUrl`/App Store details fixes (**16 days** in G3 including frontend security fixes), scoped file grants and SDK UI kit in G5 (**5.5 days**), and what must be true before anyone but an admin may publish. IDs refer to Doc 01 and Doc 08.
 
 ## What was built
 
-All eight milestones of the File Manager plan are implemented across three PRs.
+All eight milestones of the File Manager plan are implemented across three PRs (merged on 23 Nov, followed by Markdown Viewer in `pulsaros-api#60`):
 
 | PR | Contents | Plan milestones |
 | --- | --- | --- |
@@ -92,7 +92,18 @@ The analysis lists six contracts between the repos. Two get new checks: every en
 
 ### APP-05: developer console
 
-The last Phase 4 item from the Development Plan. A built-in app, visible to developers and admins, that shows per-app script logs, the list of live VMs with their budgets, and each error with its `.puls` source line and a snippet from the line map. The admin operations it needs already exist on the IPC side.
+The last Phase 4 item from the Development Plan, expanded for app UI logs (**N8**). A built-in app, visible to developers and admins, that shows per-app script logs, the list of live VMs with their budgets, each error with its `.puls` source line and a snippet from the line map, and bounded UI window `console.*` / uncaught error logs forwarded over `MessagePort` (`update-fruit-dev-workbench` OpenSpec change). The admin operations it needs already exist on the IPC side.
+
+### APP-10: theme light/dark scheme and confirmed external links (`os.openUrl`)
+
+Small SDK and host fixes identified while building Markdown Viewer (**N7**, OpenSpec `add-app-sdk-theme-and-urls`, Decision **A25**):
+
+- `themeSnapshot` computes and sends `scheme: "light" | "dark"` alongside `name` and `vars`; the SDK applies `color-scheme` and `data-pulsar-scheme` to `<html>`, replacing `color-scheme: dark light` in `pulsar-app-sdk.css` so native controls match light themes.
+- `Pulsar.os.openUrl(url)` lets apps ask the desktop to open `http:`/`https:` URLs (up to 2,048 chars, rate-limited at 5/min) in `WebBrowserApp`, always showing a confirmation dialog naming the app and displaying the full URL/origin before opening.
+
+### FE-16: App Store page metadata and script handlers
+
+Fixes **L24** in `AppDetails.svelte` and `src/apps/AppStore/ts/api.ts`: populate long description, bundle size, last updated timestamp, screenshots, and verified badge, and read `script.handlers` instead of the legacy `script.exports.handlers` field.
 
 ## Publishing beyond admins
 
@@ -122,7 +133,15 @@ If third-party developers are expected soon, G7 moves ahead of G6 (question Q1 i
 
 ## After G3
 
+### G5 platform capabilities (after SDK versioning in APP-03)
+
+- **Scoped file grants, pickers and file types (`APP-09`, G5, OpenSpec `add-app-file-handles`, Decision `A24`):** lets an app open user-chosen files or folders via `Pulsar.dialog.openFile` (including `multiple: true`, up to 50 files per pick in v1), `openFolder` and `saveFile`, and receive files launched via Open / Open with (`fileTypes` in `AppManifest.json`, `Pulsar.info.launch`), backed by `grant:<handle>` paths enforced in `appfs` and revocable in **Settings → Apps**. Markdown Viewer 1.1.0 drops `fs.user`.
+- **Shared SDK UI primitives and self-hosted icon font (`APP-11`, G5, OpenSpec `add-app-sdk-ui-kit`, Decision `A25`):** opt-in plain-CSS `pulsar-app-ui.css` (toolbars, sidebars, lists, segmented controls, status bars, empty states) and self-hosted Material Icons Round `.woff2` + `pulsar-icons.css` served from `/v1/apps/sdk/v1/fonts/{file}` under the iframe CSP (no external Google Fonts request).
+
+### Later
+
 - **Quotas (APP-06, G7):** CPU time per minute, live VM count and key-value size per app and user, with dashboards built on the OPS-08 counters.
 - **Signatures and wider publishing (APP-07, later):** sign bundles at `fruit publish`, verify at install, and store the result in the existing `manifest_signature` column.
 - **Dragging out of an app window (APP-08, later):** design only, if users ask.
+- **Desktop integration for complex apps (APP-12, later):** app menu bar declarations, keyboard shortcuts, context menus, and persisted window position/size (`Decision A25`).
 - **File Manager Lite:** its feature list stays frozen at the M6 scope. Whether it replaces the built-in File Manager is decided after G3, with the browser tests as evidence.

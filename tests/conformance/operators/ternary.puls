@@ -1,0 +1,21 @@
+// Ternary operator: precedence, right-associativity, and short-circuiting.
+print(true ? "yes" : "no");
+print(false ? 1 : 2);
+print(1 + 1 == 2 ? 10 : 20);
+
+function classify(n) {
+  return n < 0 ? "neg" : n == 0 ? "zero" : "pos";
+}
+print(classify(-5));
+print(classify(0));
+print(classify(7));
+
+// Short-circuiting skips the untaken branch.
+var count = 0;
+function bump(v) {
+  count += 1;
+  return v;
+}
+print(true ? bump(1) : 1 / 0);
+print(false ? bump(2) : bump(3));
+print(count);

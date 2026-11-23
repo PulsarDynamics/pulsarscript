@@ -1,0 +1,12 @@
+var nan = sqrt(-1);
+var nums = [3, nan, 1, -2, 10, 2];
+var sorted = arraySort(nums);
+print(len(sorted));
+print(sorted[0]);
+print(sorted[1]);
+print(sorted[2]);
+print(sorted[3]);
+print(sorted[4]);
+print(string(sorted[5]));
+print(nums[0]);
+

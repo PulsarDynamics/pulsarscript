@@ -1,0 +1,8 @@
+var fns = [];
+var i = 0;
+while (i < 4) {
+  var v = i;
+  fns[len(fns)] = function() { return v; };
+  i = i + 1;
+}
+for (var fn of fns) print(fn());

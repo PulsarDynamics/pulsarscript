@@ -1,0 +1,6 @@
+var o = {"a\nb": 1, "\u{41}": 2, "\"q\"": 3};
+print(o["a\nb"]);
+print(o.A);
+print(o["\"q\""]);
+print(objKeys(o));
+

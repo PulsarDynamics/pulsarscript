@@ -1,0 +1,4 @@
+export var inits = 0;
+inits = inits + 1;
+var val = 100;
+export function getVal() { return val; }

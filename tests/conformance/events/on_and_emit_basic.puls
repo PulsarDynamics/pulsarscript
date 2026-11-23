@@ -1,0 +1,7 @@
+var n = 0;
+on("tick", function(p) {
+  n = n + 1;
+});
+print(emit("ready", {ok: true}));
+print(n);
+

@@ -1,0 +1,8 @@
+print(dateParse("1970-01-01"));
+print(dateParse("1970-01-01T00:00:00.000Z"));
+print(dateParse("1970-01-01T01:30:00+01:30"));
+print(dateParse("2024-02-29T00:00:00Z") != nil);
+print(dateParse("2025-02-29T00:00:00Z"));
+print(dateParse("2025-02-30"));
+print(dateParse("not-a-date"));
+

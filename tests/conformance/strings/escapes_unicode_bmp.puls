@@ -1,0 +1,4 @@
+var s = "\u{41}\u{03B1}\u{20AC}";
+print(s);
+print(len(s));
+

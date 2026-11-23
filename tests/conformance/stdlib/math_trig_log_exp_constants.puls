@@ -1,0 +1,8 @@
+print(round(sin(mathPi() / 2) * 1000));
+print(round(cos(0) * 1000));
+print(round(tan(0) * 1000));
+print(round(atan2(1, 0) / mathPi() * 1000));
+print(round(log(mathE()) * 1000));
+print(round(log10(1000) * 1000));
+print(round(exp(0) * 1000));
+

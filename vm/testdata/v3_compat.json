@@ -1,0 +1,26 @@
+{
+  "format": "pulsarscript-bytecode",
+  "version": 3,
+  "compiler": "pulsarscript 1.0.0",
+  "sourceHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "constants": [5, 10],
+  "code": [
+    19, 11,
+    49, 0, 17, 0, 1, 22,
+    48, 2, 51, 0, 22,
+    0, 0, 21, 8, 1,
+    0, 1, 46, 1,
+    13, 24
+  ],
+  "functions": [
+    { "name": "", "address": 2, "arity": 1, "locals": 1, "upvalues": [{ "isLocal": true, "index": 0 }] },
+    { "name": "make", "address": 8, "arity": 1, "locals": 1 }
+  ],
+  "lineMap": [
+    1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1
+  ],
+  "sources": ["entry.puls", "util.puls"],
+  "fileMap": [
+    0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  ]
+}

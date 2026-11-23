@@ -323,7 +323,7 @@ func TestRegisterHandlerAndDispatch(t *testing.T) {
 	}
 	vm.module.Code = handlerCode
 	vm.module.Functions[0] = FunctionInfo{Name: "handle", Address: 0, Arity: 1, Locals: 1}
-	vm.handlers["onEvent"] = vm.module.Functions[0]
+	vm.handlers["onEvent"] = handlerEntry{info: vm.module.Functions[0], fn: Function(0, "handle")}
 	val, err := vm.DispatchHandler("onEvent", []Value{Number(42)})
 	if err != nil {
 		t.Fatalf("dispatch error: %v", err)
@@ -606,12 +606,13 @@ func TestObjectOperations(t *testing.T) {
 		t.Fatalf("expected object, got %v", got)
 	}
 	// Check properties
-	obj := vm.stack[0].obj
-	if obj["name"].String() != "test" {
-		t.Fatalf("expected name='test', got %v", obj["name"])
+	nameVal, _ := vm.stack[0].objectGet("name")
+	if nameVal.String() != "test" {
+		t.Fatalf("expected name='test', got %v", nameVal)
 	}
-	if obj["value"].Number() != 42 {
-		t.Fatalf("expected value=42, got %v", obj["value"])
+	valProp, _ := vm.stack[0].objectGet("value")
+	if valProp.Number() != 42 {
+		t.Fatalf("expected value=42, got %v", valProp)
 	}
 }
 
@@ -697,14 +698,14 @@ func TestObjHostCalls(t *testing.T) {
 	if vm.stack[0].Kind() != KindArray {
 		t.Fatalf("expected array, got %v", vm.stack[0].Kind())
 	}
-	keys := vm.stack[0].arr
-	if len(keys) != 2 {
-		t.Fatalf("expected 2 keys, got %d", len(keys))
+	keys := vm.stack[0]
+	if keys.arrayLen() != 2 {
+		t.Fatalf("expected 2 keys, got %d", keys.arrayLen())
 	}
 	// Keys may be in any order due to map iteration
 	keyStrings := make(map[string]bool)
-	for _, k := range keys {
-		keyStrings[k.String()] = true
+	for i := 0; i < keys.arrayLen(); i++ {
+		keyStrings[keys.arrayAt(i).String()] = true
 	}
 	if !keyStrings["a"] || !keyStrings["b"] {
 		t.Fatalf("expected keys 'a' and 'b', got %v", keys)
@@ -902,7 +903,7 @@ func TestEndToEndScriptExecution(t *testing.T) {
 	vm := NewVM(mod, HostCallbacks{})
 
 	// Register handler directly by setting in handlers map
-	vm.handlers["add"] = functions[0]
+	vm.handlers["add"] = handlerEntry{info: functions[0], fn: Function(0, functions[0].Name)}
 
 	// Dispatch handler with arguments
 	result, err := vm.DispatchHandler("add", []Value{Number(10), Number(32)})
@@ -958,16 +959,16 @@ func TestScriptWithArrayAndObjectOperations(t *testing.T) {
 	}
 
 	// Check items property is array
-	items := obj.obj["items"]
+	items, _ := obj.objectGet("items")
 	if items.Kind() != KindArray {
 		t.Fatalf("expected array for items, got %v", items.Kind())
 	}
-	if len(items.arr) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(items.arr))
+	if items.arrayLen() != 3 {
+		t.Fatalf("expected 3 items, got %d", items.arrayLen())
 	}
 
 	// Check count property
-	count := obj.obj["count"]
+	count, _ := obj.objectGet("count")
 	if count.Kind() != KindNumber || count.Number() != 3 {
 		t.Fatalf("expected count=3, got %v", count)
 	}

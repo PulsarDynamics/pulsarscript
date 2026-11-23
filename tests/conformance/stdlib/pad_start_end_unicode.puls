@@ -1,0 +1,8 @@
+print(padStart("42", 5, "0"));
+print(padEnd("42", 5, "."));
+print(padStart("hi", 5));
+print(padStart("hello", 3, "0"));
+print(padStart("x", 4, "ab"));
+print(padEnd("😀", 3, "xy"));
+print(padStart("x", 5, ""));
+

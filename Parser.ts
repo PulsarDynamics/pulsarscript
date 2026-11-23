@@ -22,6 +22,11 @@ import { IndexExpr } from "./classes/IndexExpr";
 import { SetIndex } from "./classes/SetIndex";
 import { BreakStmt } from "./classes/BreakStmt";
 import { ForOfStmt } from "./classes/ForOfStmt";
+import { TernaryExpr } from "./classes/TernaryExpr";
+import { TemplateLiteralExpr } from "./classes/TemplateLiteralExpr";
+import { FunctionExpr } from "./classes/FunctionExpr";
+import { ImportStmt, type ImportSpecifier } from "./classes/ImportStmt";
+import { ExportStmt, type ExportSpecifier } from "./classes/ExportStmt";
 import type { Expr } from "./interfaces/Expr";
 import type { Stmt } from "./interfaces/Stmt";
 import type { Token } from "./interfaces/Token";
@@ -65,14 +70,86 @@ export class Parser {
     private declaration(): Stmt {
         const line = this.peek().line;
         try {
+            if (this.match(TokenType.IMPORT)) return this.withLine(line, this.importDeclaration(this.previous()));
+            if (this.match(TokenType.EXPORT)) return this.withLine(line, this.exportDeclaration(this.previous()));
             if (this.match(TokenType.VAR)) return this.withLine(line, this.varDeclaration());
             if (this.match(TokenType.CONST)) return this.withLine(line, this.varDeclaration(true));
-            if (this.match(TokenType.FUNCTION)) return this.withLine(line, this.function("function"));
+            if (this.check(TokenType.FUNCTION) && this.peekAt(1).type === TokenType.IDENTIFIER) {
+                this.advance();
+                return this.withLine(line, this.function("function"));
+            }
             return this.statement();
         } catch (error) {
             this.synchronize();
             return new ExpressionStmt(new Literal(null));
         }
+    }
+
+    private matchContextualKeyword(word: string): boolean {
+        if (this.check(TokenType.IDENTIFIER) && this.peek().lexeme === word) {
+            this.advance();
+            return true;
+        }
+        return false;
+    }
+
+    private consumeContextualKeyword(word: string, message: string): Token {
+        if (this.check(TokenType.IDENTIFIER) && this.peek().lexeme === word) {
+            return this.advance();
+        }
+        throw this.error(this.peek(), message);
+    }
+
+    private importDeclaration(keyword: Token): Stmt {
+        this.consume(TokenType.LEFT_BRACE, "Expect '{' after 'import'.");
+        const specifiers: ImportSpecifier[] = [];
+        if (!this.check(TokenType.RIGHT_BRACE)) {
+            do {
+                if (this.check(TokenType.RIGHT_BRACE)) break;
+                const imported = this.consume(TokenType.IDENTIFIER, "Expect imported identifier.");
+                let local = imported;
+                if (this.matchContextualKeyword("as")) {
+                    local = this.consume(TokenType.IDENTIFIER, "Expect alias identifier after 'as'.");
+                }
+                specifiers.push({ imported, local });
+            } while (this.match(TokenType.COMMA));
+        }
+        this.consume(TokenType.RIGHT_BRACE, "Expect '}' after import specifiers.");
+        this.consumeContextualKeyword("from", "Expect 'from' after import specifiers.");
+        const source = this.consume(TokenType.STRING, "Expect module path string after 'from'.");
+        this.consume(TokenType.SEMICOLON, "Expect ';' after import declaration.");
+        return new ImportStmt(keyword, specifiers, source);
+    }
+
+    private exportDeclaration(keyword: Token): Stmt {
+        if (this.match(TokenType.VAR)) {
+            return new ExportStmt(keyword, this.withLine(this.previous().line, this.varDeclaration(false)), null);
+        }
+        if (this.match(TokenType.CONST)) {
+            return new ExportStmt(keyword, this.withLine(this.previous().line, this.varDeclaration(true)), null);
+        }
+        if (this.check(TokenType.FUNCTION) && this.peekAt(1).type === TokenType.IDENTIFIER) {
+            this.advance();
+            return new ExportStmt(keyword, this.withLine(this.previous().line, this.function("function")), null);
+        }
+        if (this.match(TokenType.LEFT_BRACE)) {
+            const specifiers: ExportSpecifier[] = [];
+            if (!this.check(TokenType.RIGHT_BRACE)) {
+                do {
+                    if (this.check(TokenType.RIGHT_BRACE)) break;
+                    const local = this.consume(TokenType.IDENTIFIER, "Expect exported identifier.");
+                    let exported = local;
+                    if (this.matchContextualKeyword("as")) {
+                        exported = this.consume(TokenType.IDENTIFIER, "Expect export alias identifier after 'as'.");
+                    }
+                    specifiers.push({ local, exported });
+                } while (this.match(TokenType.COMMA));
+            }
+            this.consume(TokenType.RIGHT_BRACE, "Expect '}' after export specifiers.");
+            this.consume(TokenType.SEMICOLON, "Expect ';' after export statement.");
+            return new ExportStmt(keyword, null, specifiers);
+        }
+        throw this.error(this.peek(), "Expect 'function', 'var', 'const', or '{' after 'export'.");
     }
 
     private varDeclaration(isConst = false): Stmt {
@@ -263,36 +340,58 @@ export class Parser {
     }
 
     private assignment(): Expr {
-        const expr = this.or();
+        const expr = this.ternary();
 
         if (this.match(TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL)
             || this.match(TokenType.STAR_EQUAL, TokenType.SLASH_EQUAL, TokenType.PERCENT_EQUAL)) {
             const equals = this.previous();
-            let value = this.assignment();
-
-            // `x op= e` is `x = x op e`; the target is evaluated as written (SPEC 4.4).
-            if (equals.type !== TokenType.EQUAL) {
-                const opType = {
-                    [TokenType.PLUS_EQUAL]: TokenType.PLUS,
-                    [TokenType.MINUS_EQUAL]: TokenType.MINUS,
-                    [TokenType.STAR_EQUAL]: TokenType.STAR,
-                    [TokenType.SLASH_EQUAL]: TokenType.SLASH,
-                    [TokenType.PERCENT_EQUAL]: TokenType.PERCENT,
-                }[equals.type as string] as TokenType;
-                const operator: Token = { ...equals, type: opType, lexeme: equals.lexeme.slice(0, -1) };
-                value = new Binary(expr, operator, value);
-            }
+            const rawValue = this.assignment();
 
             if (expr instanceof Variable) {
+                let value = rawValue;
+                if (equals.type !== TokenType.EQUAL) {
+                    const opType = {
+                        [TokenType.PLUS_EQUAL]: TokenType.PLUS,
+                        [TokenType.MINUS_EQUAL]: TokenType.MINUS,
+                        [TokenType.STAR_EQUAL]: TokenType.STAR,
+                        [TokenType.SLASH_EQUAL]: TokenType.SLASH,
+                        [TokenType.PERCENT_EQUAL]: TokenType.PERCENT,
+                    }[equals.type as string] as TokenType;
+                    const operator: Token = { ...equals, type: opType, lexeme: equals.lexeme.slice(0, -1) };
+                    value = new Binary(expr, operator, rawValue);
+                }
                 return new Assign(expr.name, value);
             }
             if (expr instanceof IndexExpr) {
-                return new SetIndex(expr, value, equals);
+                let operator: Token | null = null;
+                if (equals.type !== TokenType.EQUAL) {
+                    const opType = {
+                        [TokenType.PLUS_EQUAL]: TokenType.PLUS,
+                        [TokenType.MINUS_EQUAL]: TokenType.MINUS,
+                        [TokenType.STAR_EQUAL]: TokenType.STAR,
+                        [TokenType.SLASH_EQUAL]: TokenType.SLASH,
+                        [TokenType.PERCENT_EQUAL]: TokenType.PERCENT,
+                    }[equals.type as string] as TokenType;
+                    operator = { ...equals, type: opType, lexeme: equals.lexeme.slice(0, -1) };
+                }
+                return new SetIndex(expr, rawValue, equals, operator);
             }
 
             this.error(equals, "Invalid assignment target.");
         }
 
+        return expr;
+    }
+
+    private ternary(): Expr {
+        const expr = this.or();
+        if (this.match(TokenType.QUESTION)) {
+            const question = this.previous();
+            const thenBranch = this.expression();
+            this.consume(TokenType.COLON, "Expect ':' after ternary branch.");
+            const elseBranch = this.ternary();
+            return new TernaryExpr(expr, question, thenBranch, elseBranch);
+        }
         return expr;
     }
 
@@ -428,8 +527,44 @@ export class Parser {
         if (this.match(TokenType.TRUE)) return new Literal(true);
         if (this.match(TokenType.NIL)) return new Literal(null);
 
-        if (this.match(TokenType.NUMBER, TokenType.STRING)) {
+        if (this.match(TokenType.NUMBER, TokenType.STRING, TokenType.TEMPLATE_STRING)) {
             return new Literal(this.previous().literal);
+        }
+
+        if (this.match(TokenType.TEMPLATE_HEAD)) {
+            const head = this.previous();
+            const parts: Expr[] = [this.withLine(head.line, new Literal(head.literal))];
+            while (true) {
+                parts.push(this.expression());
+                if (this.match(TokenType.TEMPLATE_MIDDLE)) {
+                    const mid = this.previous();
+                    parts.push(this.withLine(mid.line, new Literal(mid.literal)));
+                    continue;
+                }
+                const tail = this.consume(TokenType.TEMPLATE_TAIL, "Expect '}' after template expression.");
+                parts.push(this.withLine(tail.line, new Literal(tail.literal)));
+                break;
+            }
+            return new TemplateLiteralExpr(parts, head);
+        }
+
+        if (this.match(TokenType.FUNCTION)) {
+            const keyword = this.previous();
+            const name = this.check(TokenType.IDENTIFIER) ? this.advance() : null;
+            this.consume(TokenType.LEFT_PAREN, "Expect '(' after function.");
+            const parameters: Token[] = [];
+            if (!this.check(TokenType.RIGHT_PAREN)) {
+                do {
+                    if (parameters.length >= 255) {
+                        this.error(this.peek(), "Can't have more than 255 parameters.");
+                    }
+                    parameters.push(this.consume(TokenType.IDENTIFIER, "Expect parameter name."));
+                } while (this.match(TokenType.COMMA));
+            }
+            this.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.");
+            this.consume(TokenType.LEFT_BRACE, "Expect '{' before function body.");
+            const body = this.block();
+            return new FunctionExpr(keyword, name, parameters, body);
         }
 
         if (this.match(TokenType.IDENTIFIER)) {

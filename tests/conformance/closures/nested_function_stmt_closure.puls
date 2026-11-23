@@ -1,0 +1,6 @@
+function makeAdder(base) {
+  function inner(d) { return base + d; }
+  return inner;
+}
+var a5 = makeAdder(5);
+print(a5(7));

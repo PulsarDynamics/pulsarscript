@@ -1,0 +1,13 @@
+import { explode } from "./.fixtures/boom.puls";
+function wrapper(v) {
+  return explode(v);
+}
+try {
+  wrapper(0);
+} catch (e) {
+  print(e.kind);
+  var s = arrayJoin(e.stack, "|");
+  print(indexOf(s, "explode (.fixtures/boom.puls:2)") >= 0);
+  print(indexOf(s, "wrapper (multifile_error_stack.puls:3)") >= 0);
+  print(indexOf(s, "<script> (multifile_error_stack.puls:6)") >= 0);
+}

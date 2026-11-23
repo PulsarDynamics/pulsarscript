@@ -27,14 +27,19 @@ import type { IOBridge } from "./interfaces/IO";
 import { ErrorExpr } from "./classes/ErrorExpr";
 import { TryCatchStmt } from "./classes/TryCatchStmt";
 import type { CallFrame } from "./ErrorReporter";
-import { fromHost, isArray, isObject, sortedKeys, stringify, toHost, toNumber, typeName, valuesEqual } from "./Values";
+import { compareStringsByCodePoint, fromHost, isArray, isObject, sortedKeys, stringify, toHost, toNumber, typeName, valuesEqual } from "./Values";
 import { HOST_FUNCTIONS, arityError, arityRange, lookupHostFunction, type HostFunction } from "./HostApi";
-import type { IndexExpr } from "./classes/IndexExpr";
+import { IndexExpr } from "./classes/IndexExpr";
 import type { SetIndex } from "./classes/SetIndex";
 import type { BreakStmt } from "./classes/BreakStmt";
 import type { ForOfStmt } from "./classes/ForOfStmt";
+import type { TernaryExpr } from "./classes/TernaryExpr";
+import type { TemplateLiteralExpr } from "./classes/TemplateLiteralExpr";
+import { FunctionExpr } from "./classes/FunctionExpr";
+import type { ImportStmt } from "./classes/ImportStmt";
+import { ExportStmt } from "./classes/ExportStmt";
 
-const RE_FLOAT = /^[+-]?(?:\d+\.\d+|\d+\.\d*|\.\d+|\d+)$/;
+const RE_FLOAT = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 // Runtime error class
 export class RuntimeError extends Error {
@@ -55,6 +60,16 @@ export class RuntimeError extends Error {
 export class BudgetError extends RuntimeError {
   constructor(message: string) {
     super({ type: TokenType.IDENTIFIER, lexeme: "", literal: null, line: 0 } as Token, message);
+  }
+}
+
+/**
+ * Uncatchable memory limit error (LANG-01): string/collection/live-heap bounds.
+ */
+export class MemoryLimitError extends RuntimeError {
+  constructor(token: Token, message: string, callStack: CallFrame[] = []) {
+    const msg = message.startsWith("memory limit exceeded:") ? message : `memory limit exceeded: ${message}`;
+    super(token, msg, callStack);
   }
 }
 
@@ -135,32 +150,47 @@ class Environment {
 // Callable interface for functions
 interface PulsarCallable {
   arity(): number;
-  call(interpreter: Interpreter, args: any[]): any;
+  call(interpreter: Interpreter, args: any[], callLine?: number): any;
   toString(): string;
 }
 
-// Function wrapper
+// Function wrapper (both declared FunctionStmt and closure FunctionExpr)
 class PulsarFunction implements PulsarCallable {
-  private declaration: FunctionStmt;
+  private declaration: FunctionStmt | FunctionExpr;
   private closure: Environment;
 
-  constructor(declaration: FunctionStmt, closure: Environment) {
+  constructor(declaration: FunctionStmt | FunctionExpr, closure: Environment) {
     this.declaration = declaration;
     this.closure = closure;
+  }
+
+  get functionName(): string {
+    return this.declaration.name?.lexeme ?? "";
   }
 
   arity(): number {
     return this.declaration.params.length;
   }
 
-  call(interpreter: Interpreter, args: any[]): any {
+  call(interpreter: Interpreter, args: any[], callLine = 0): any {
     const environment = new Environment(this.closure);
-    
-    // Add this function call to the stack (enforces the call-depth limit and the step budget)
-    interpreter.enterCall(this.declaration.name, {
-      functionName: this.declaration.name.lexeme,
-      line: this.declaration.name.line
+    if (this.declaration instanceof FunctionExpr && this.declaration.name) {
+      const selfName = this.declaration.name.lexeme;
+      if (!this.declaration.params.some((p) => p.lexeme === selfName)) {
+        environment.define(selfName, this);
+      }
+    }
+
+    const tok = this.declaration instanceof FunctionExpr
+      ? (this.declaration.name ?? this.declaration.keyword)
+      : this.declaration.name;
+    interpreter.enterCall(tok, {
+      functionName: this.functionName || "<anonymous>",
+      line: tok.line,
+      callLine,
+      callFile: interpreter.currentSourceFile(),
     });
+    const prevFile = interpreter.enterFile((this.declaration as any).sourceIndex);
 
     try {
       for (let i = 0; i < this.declaration.params.length; i++) {
@@ -178,13 +208,13 @@ class PulsarFunction implements PulsarCallable {
 
       return null;
     } finally {
-      // Remove from stack when function exits
+      interpreter.exitFile(prevFile);
       interpreter.popCallFrame();
     }
   }
 
   toString(): string {
-    return `<fn ${this.declaration.name.lexeme}>`;
+    return `<fn ${this.functionName || "anonymous"}>`;
   }
 }
 
@@ -200,12 +230,18 @@ export interface ExecutionLimits {
   maxSteps?: number;
   timeoutMs?: number;
   maxCallDepth?: number;
+  maxStringBytes?: number;
+  maxCollectionLen?: number;
+  maxMemoryBytes?: number;
 }
 
 export const DEFAULT_LIMITS: Required<ExecutionLimits> = {
   maxSteps: 10_000_000,
   timeoutMs: 10_000,
   maxCallDepth: 256,
+  maxStringBytes: 16 * 1024 * 1024,
+  maxCollectionLen: 1_000_000,
+  maxMemoryBytes: 256 * 1024 * 1024,
 };
 
 /** Bridge for emitEvent/pollEvent (host provided). */
@@ -237,11 +273,17 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   private limits: Required<ExecutionLimits>;
   private steps = 0;
   private deadline = Infinity;
+  private memBytes = 0;
   private callStack: CallFrame[] = [];
   private ipcBridge?: IPCBridge;
   private ipcDefaults: { deviceId?: string; processId?: string } = {};
   private handlers: Map<string, PulsarFunction> = new Map();
+  private eventListeners: Map<string, PulsarFunction[]> = new Map();
   private rngState: number | null = null;
+  private textEncoder = new TextEncoder();
+  private currentCallLine = 0;
+  private sources: string[] = [];
+  private currentFileIndex = 0;
 
   constructor(options: InterpreterOptions = {}) {
     // Initialize globals with reference to this interpreter
@@ -269,8 +311,7 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     const ensureIO = (name: string): IOBridge => this.options.io ?? fail(name, "IO bridge not configured");
     const ensureIPC = (name: string): IPCBridge => this.ipcBridge ?? fail(name, "IPC bridge not configured");
     const ensureEvents = (name: string): EventBridge => this.options.events ?? fail(name, "event bridge not configured");
-    // Host results become language values; async results stay promises (resolved by the host).
-    const fromHostResult = (val: any) => (val instanceof Promise ? val.then(fromHost) : fromHost(val));
+    const fromHostResult = (val: any) => (val instanceof Promise ? val.then((v) => this.accountValue(fromHost(v))) : this.accountValue(fromHost(val)));
     const codePoints = (s: string) => [...s];
     const key = (k: any): string => this.stringify(k);
     const arrayArg = (name: string, v: any): any[] => (isArray(v) ? v : fail(name, "expected array"));
@@ -324,15 +365,130 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       if (resp.error) fail(name, resp.error.message ? `${resp.error.code}: ${resp.error.message}` : resp.error.code);
       return fromHost(resp.result ?? null);
     };
+    const callCallback = (fnName: string, cb: any, cbArgs: any[]): any => {
+      if (!this.isCallable(cb)) fail(fnName, `expected function, got ${typeName(cb)}`);
+      const f = cb as PulsarCallable;
+      const expected = f.arity();
+      if (expected >= 0 && cbArgs.length !== expected) {
+        const cbName = cb instanceof PulsarFunction && cb.functionName ? cb.functionName : "callback";
+        fail(fnName, `${cbName} expects ${expected} args, got ${cbArgs.length}`);
+      }
+      return f.call(this, cbArgs, this.currentCallLine);
+    };
+    const mergeSort = (items: any[], less: (a: any, b: any) => boolean): any[] => {
+      if (items.length <= 1) return [...items];
+      const mid = Math.floor(items.length / 2);
+      const left = mergeSort(items.slice(0, mid), less);
+      const right = mergeSort(items.slice(mid), less);
+      const out: any[] = [];
+      let i = 0;
+      let j = 0;
+      while (i < left.length && j < right.length) {
+        if (less(right[j], left[i])) {
+          out.push(right[j++]);
+        } else {
+          out.push(left[i++]);
+        }
+      }
+      while (i < left.length) out.push(left[i++]);
+      while (j < right.length) out.push(right[j++]);
+      return out;
+    };
+    const padStr = (fnName: string, sVal: any, lenVal: any, fillVal: any, padStartMode: boolean): string => {
+      const s = str(fnName, sVal);
+      const targetNum = num(fnName, lenVal);
+      if (!Number.isFinite(targetNum)) fail(fnName, "length must be a finite number");
+      const targetLen = Math.trunc(targetNum);
+      const fill = fillVal === undefined ? " " : str(fnName, fillVal);
+      const sChars = codePoints(s);
+      if (targetLen <= sChars.length || fill === "") return s;
+      const fillChars = codePoints(fill);
+      const need = targetLen - sChars.length;
+      const fullCopies = Math.floor(need / fillChars.length);
+      const rem = need % fillChars.length;
+      const sBytes = this.utf8ByteLength(s);
+      const fillBytes = this.utf8ByteLength(fill);
+      let remBytes = 0;
+      for (let i = 0; i < rem; i++) remBytes += this.utf8ByteLength(fillChars[i]);
+      this.checkStringSize(sBytes + fullCopies * fillBytes + remBytes, nativeToken(fnName));
+      const pad = fill.repeat(fullCopies) + fillChars.slice(0, rem).join("");
+      return padStartMode ? pad + s : s + pad;
+    };
+    const convertParsedJSON = (val: any, depth: number): any => {
+      if (val === null || typeof val === "boolean") return val;
+      if (typeof val === "number") {
+        if (!Number.isFinite(val)) fail("jsonParse", "non-finite number");
+        return val === 0 ? 0 : val;
+      }
+      if (typeof val === "string") {
+        this.checkStringSize(this.utf8ByteLength(val), nativeToken("jsonParse"));
+        return val;
+      }
+      if (depth + 1 > 64) fail("jsonParse", "maximum nesting depth 64 exceeded");
+      if (Array.isArray(val)) {
+        this.checkCollectionSize(val.length, nativeToken("jsonParse"));
+        this.accountAlloc(48 + val.length * 32, nativeToken("jsonParse"));
+        return val.map((el) => convertParsedJSON(el, depth + 1));
+      }
+      if (typeof val === "object") {
+        const entries = Object.entries(val);
+        this.checkCollectionSize(entries.length, nativeToken("jsonParse"));
+        this.accountAlloc(48 + entries.length * 48, nativeToken("jsonParse"));
+        const m = new Map<string, any>();
+        for (const [k, v] of entries) {
+          this.checkStringSize(this.utf8ByteLength(k), nativeToken("jsonParse"));
+          m.set(k, convertParsedJSON(v, depth + 1));
+        }
+        return m;
+      }
+      return fail("jsonParse", "unsupported value");
+    };
+    const serializeJSON = (val: any, depth: number): string => {
+      if (val === null || val === undefined) return "null";
+      if (typeof val === "boolean") return val ? "true" : "false";
+      if (typeof val === "number") {
+        if (!Number.isFinite(val)) return fail("jsonStringify", "cannot serialize non-finite number");
+        return JSON.stringify(val === 0 ? 0 : val);
+      }
+      if (typeof val === "string") return JSON.stringify(val);
+      if (isArray(val)) {
+        if (depth + 1 > 64) return fail("jsonStringify", "maximum nesting depth 64 exceeded");
+        return "[" + val.map((el) => serializeJSON(el, depth + 1)).join(",") + "]";
+      }
+      if (isObject(val)) {
+        if (depth + 1 > 64) return fail("jsonStringify", "maximum nesting depth 64 exceeded");
+        const keys = sortedKeys(val);
+        return "{" + keys.map((k) => `${JSON.stringify(k)}:${serializeJSON(val.get(k), depth + 1)}`).join(",") + "}";
+      }
+      if (this.isCallable(val)) return fail("jsonStringify", "cannot serialize function");
+      return fail("jsonStringify", "unsupported value kind");
+    };
+    const RE_ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2}))?$/;
+    const daysInMonthUTC = (year: number, month: number): number => {
+      if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+      if ([4, 6, 9, 11].includes(month)) return 30;
+      return 31;
+    };
 
     // One implementation per hostapi.json entry (SPEC §8). Arity and argument types are checked
     // from the registry before an implementation runs (see defineRegistered below).
     const impls: Record<string, (...args: any[]) => any> = {
       // Core / types
       typeOf: (v) => typeName(v),
-      string: (v) => this.stringify(v),
+      string: (v) => {
+        if (typeof v === "string") return v;
+        const s = this.stringify(v);
+        this.checkStringSize(this.utf8ByteLength(s), nativeToken("string"));
+        return s;
+      },
       number: (v) => toNumber(v),
-      concat: (...args) => args.map((a) => this.stringify(a)).join(""),
+      concat: (...args) => {
+        const parts = args.map((a) => this.stringify(a));
+        let bytes = 0;
+        for (const p of parts) bytes += this.utf8ByteLength(p);
+        this.checkStringSize(bytes, nativeToken("concat"));
+        return parts.join("");
+      },
       len: (v) => (isArray(v) ? v.length : codePoints(str("len", v)).length),
       // Math
       abs: (n) => Math.abs(num("abs", n)),
@@ -346,14 +502,138 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       clamp: (n, lo, hi) => Math.min(Math.max(num("clamp", n), num("clamp", lo)), num("clamp", hi)),
       isInteger: (n) => typeof n === "number" && Number.isInteger(n),
       isFinite: (n) => typeof n === "number" && Number.isFinite(n),
+      sin: (n) => Math.sin(num("sin", n)),
+      cos: (n) => Math.cos(num("cos", n)),
+      tan: (n) => Math.tan(num("tan", n)),
+      atan2: (y, x) => Math.atan2(num("atan2", y), num("atan2", x)),
+      log: (n) => Math.log(num("log", n)),
+      log10: (n) => Math.log10(num("log10", n)),
+      exp: (n) => Math.exp(num("exp", n)),
+      mathPi: () => Math.PI,
+      mathE: () => Math.E,
       // Strings (indices and lengths count code points, like len)
-      toUpper: (s) => str("toUpper", s).toUpperCase(),
-      toLower: (s) => str("toLower", s).toLowerCase(),
+      toUpper: (s) => {
+        const res = str("toUpper", s).toUpperCase();
+        this.checkStringSize(this.utf8ByteLength(res), nativeToken("toUpper"));
+        return res;
+      },
+      toLower: (s) => {
+        const res = str("toLower", s).toLowerCase();
+        this.checkStringSize(this.utf8ByteLength(res), nativeToken("toLower"));
+        return res;
+      },
       trim: (s) => str("trim", s).trim(),
-      indexOf: (s, sub) => {
-        const text = str("indexOf", s);
-        const i = text.indexOf(str("indexOf", sub));
-        return i < 0 ? -1 : codePoints(text.slice(0, i)).length;
+      indexOf: (s, sub, start) => {
+        const chars = codePoints(str("indexOf", s));
+        const subChars = codePoints(str("indexOf", sub));
+        let startIdx = 0;
+        if (start !== undefined) {
+          const sn = num("indexOf", start);
+          if (!Number.isFinite(sn)) fail("indexOf", "start index must be a finite number");
+          startIdx = Math.max(0, Math.trunc(sn));
+        }
+        if (startIdx > chars.length) return -1;
+        if (subChars.length === 0) return startIdx;
+        const limit = chars.length - subChars.length;
+        for (let i = startIdx; i <= limit; i++) {
+          let match = true;
+          for (let j = 0; j < subChars.length; j++) {
+            if (chars[i + j] !== subChars[j]) {
+              match = false;
+              break;
+            }
+          }
+          if (match) return i;
+        }
+        return -1;
+      },
+      lastIndexOf: (s, sub, start) => {
+        const chars = codePoints(str("lastIndexOf", s));
+        const subChars = codePoints(str("lastIndexOf", sub));
+        let maxIdx = chars.length;
+        if (start !== undefined) {
+          const sn = num("lastIndexOf", start);
+          if (!Number.isFinite(sn)) fail("lastIndexOf", "start index must be a finite number");
+          maxIdx = Math.min(chars.length, Math.max(0, Math.trunc(sn)));
+        }
+        if (subChars.length === 0) return maxIdx;
+        const limit = chars.length - subChars.length;
+        for (let i = Math.min(maxIdx, limit); i >= 0; i--) {
+          let match = true;
+          for (let j = 0; j < subChars.length; j++) {
+            if (chars[i + j] !== subChars[j]) {
+              match = false;
+              break;
+            }
+          }
+          if (match) return i;
+        }
+        return -1;
+      },
+      split: (s, sep) => {
+        const text = str("split", s);
+        const delim = str("split", sep);
+        const parts = delim === "" ? codePoints(text) : text.split(delim);
+        this.checkCollectionSize(parts.length, nativeToken("split"));
+        this.accountAlloc(48 + parts.length * 32, nativeToken("split"));
+        return parts;
+      },
+      replace: (s, target, replacement) => {
+        const text = str("replace", s);
+        const tgt = str("replace", target);
+        const repl = str("replace", replacement);
+        const textBytes = this.utf8ByteLength(text);
+        const replBytes = this.utf8ByteLength(repl);
+        if (tgt === "") {
+          const chars = codePoints(text);
+          if (replBytes > 0) {
+            this.checkStringSize(textBytes + (chars.length + 1) * replBytes, nativeToken("replace"));
+          }
+          const res = chars.length === 0 ? repl : repl + chars.map((c) => c + repl).join("");
+          this.checkStringSize(this.utf8ByteLength(res), nativeToken("replace"));
+          return res;
+        }
+        const parts = text.split(tgt);
+        const count = parts.length - 1;
+        if (count > 0 && replBytes > this.utf8ByteLength(tgt)) {
+          this.checkStringSize(textBytes + count * (replBytes - this.utf8ByteLength(tgt)), nativeToken("replace"));
+        }
+        const res = parts.join(repl);
+        this.checkStringSize(this.utf8ByteLength(res), nativeToken("replace"));
+        return res;
+      },
+      startsWith: (s, prefix) => str("startsWith", s).startsWith(str("startsWith", prefix)),
+      endsWith: (s, suffix) => str("endsWith", s).endsWith(str("endsWith", suffix)),
+      repeat: (s, count) => {
+        const text = str("repeat", s);
+        const cnt = num("repeat", count);
+        if (!Number.isFinite(cnt) || cnt < 0) fail("repeat", "count must be a finite non-negative number");
+        const n = Math.trunc(cnt);
+        if (n === 0 || text === "") return "";
+        const byteLen = this.utf8ByteLength(text);
+        const maxStr = this.limits.maxStringBytes;
+        if (maxStr > 0 && Number.isFinite(maxStr) && n > Math.floor(maxStr / byteLen)) {
+          this.checkStringSize(maxStr + 1, nativeToken("repeat"));
+        }
+        this.checkStringSize(byteLen * n, nativeToken("repeat"));
+        return text.repeat(n);
+      },
+      padStart: (s, length, fill) => padStr("padStart", s, length, fill, true),
+      padEnd: (s, length, fill) => padStr("padEnd", s, length, fill, false),
+      charCodeAt: (s, index) => {
+        const chars = codePoints(str("charCodeAt", s));
+        const idxNum = num("charCodeAt", index);
+        if (!Number.isFinite(idxNum)) fail("charCodeAt", "index must be a finite number");
+        const idx = Math.trunc(idxNum);
+        if (idx < 0 || idx >= chars.length) return null;
+        return chars[idx].codePointAt(0) ?? null;
+      },
+      fromCharCode: (code) => {
+        const c = num("fromCharCode", code);
+        if (!Number.isFinite(c) || !Number.isInteger(c) || c < 0 || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) {
+          fail("fromCharCode", `invalid Unicode code point ${c}`);
+        }
+        return String.fromCodePoint(c);
       },
       substr: (s, start, length) => {
         const chars = codePoints(str("substr", s));
@@ -362,7 +642,9 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         if (!Number.isFinite(i) || !Number.isFinite(n)) fail("substr", "start and length must be finite numbers");
         if (i < 0) fail("substr", "start index cannot be negative");
         if (n < 0) fail("substr", "length cannot be negative");
-        return chars.slice(i, i + n).join("");
+        const sub = chars.slice(i, i + n).join("");
+        this.checkStringSize(this.utf8ByteLength(sub), nativeToken("substr"));
+        return sub;
       },
       // Parsing
       parseInt: (s, base) => parseIntStrict(s, base),
@@ -376,6 +658,64 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       toNumberOr: (v, fallback) => toNumber(v) ?? fallback,
       // Time / random
       clock: () => Date.now(),
+      dateFormat: (ms, pattern) => {
+        const msNum = num("dateFormat", ms);
+        if (!Number.isFinite(msNum) || msNum < -8.64e15 || msNum > 8.64e15) {
+          fail("dateFormat", "timestamp out of range");
+        }
+        const fmt = pattern === undefined ? "YYYY-MM-DDTHH:mm:ss.SSSZ" : str("dateFormat", pattern);
+        const d = new Date(Math.trunc(msNum));
+        const rawYear = d.getUTCFullYear();
+        const year = rawYear < 0 ? `-${String(-rawYear).padStart(4, "0")}` : String(rawYear).padStart(4, "0");
+        const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(d.getUTCDate()).padStart(2, "0");
+        const hour = String(d.getUTCHours()).padStart(2, "0");
+        const min = String(d.getUTCMinutes()).padStart(2, "0");
+        const sec = String(d.getUTCSeconds()).padStart(2, "0");
+        const millis = String(d.getUTCMilliseconds()).padStart(3, "0");
+        let out = "";
+        for (let i = 0; i < fmt.length; ) {
+          if (fmt.startsWith("YYYY", i)) { out += year; i += 4; }
+          else if (fmt.startsWith("MM", i)) { out += month; i += 2; }
+          else if (fmt.startsWith("DD", i)) { out += day; i += 2; }
+          else if (fmt.startsWith("HH", i)) { out += hour; i += 2; }
+          else if (fmt.startsWith("mm", i)) { out += min; i += 2; }
+          else if (fmt.startsWith("ss", i)) { out += sec; i += 2; }
+          else if (fmt.startsWith("SSS", i)) { out += millis; i += 3; }
+          else { out += fmt[i]; i++; }
+        }
+        this.checkStringSize(this.utf8ByteLength(out), nativeToken("dateFormat"));
+        return out;
+      },
+      dateParse: (s) => {
+        const text = str("dateParse", s);
+        const m = RE_ISO_DATE.exec(text);
+        if (!m) return null;
+        const year = Number(m[1]);
+        const month = Number(m[2]);
+        const day = Number(m[3]);
+        if (month < 1 || month > 12 || day < 1 || day > daysInMonthUTC(year, month)) return null;
+        let hour = 0, minute = 0, second = 0, milli = 0, offsetMs = 0;
+        if (m[4] !== undefined) {
+          hour = Number(m[4]);
+          minute = Number(m[5]);
+          second = m[6] !== undefined ? Number(m[6]) : 0;
+          milli = m[7] !== undefined ? Number(m[7].padEnd(3, "0")) : 0;
+          if (hour > 23 || minute > 59 || second > 59) return null;
+          const tz = m[8];
+          if (tz !== "Z") {
+            const tzH = Number(tz.slice(1, 3));
+            const tzM = Number(tz.slice(4, 6));
+            if (tzH > 23 || tzM > 59) return null;
+            offsetMs = (tzH * 60 + tzM) * 60_000;
+            if (tz[0] === "-") offsetMs = -offsetMs;
+          }
+        }
+        const d = new Date(0);
+        d.setUTCFullYear(year, month - 1, day);
+        d.setUTCHours(hour, minute, second, milli);
+        return d.getTime() - offsetMs;
+      },
       random: () => random(),
       randomInt: (a, b) => {
         const x = Math.trunc(num("randomInt", a));
@@ -390,7 +730,13 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       },
       // Arrays and objects (SPEC §3.3): values; every function returns a new value.
       arrayLen: (a) => arrayArg("arrayLen", a).length,
-      arrayPush: (a, ...values) => [...arrayArg("arrayPush", a), ...values],
+      arrayPush: (a, ...values) => {
+        const base = arrayArg("arrayPush", a);
+        const newLen = base.length + values.length;
+        this.checkCollectionSize(newLen, nativeToken("arrayPush"));
+        this.accountAlloc(48 + newLen * 32, nativeToken("arrayPush"));
+        return [...base, ...values];
+      },
       arrayPop: (a) => {
         const arr = arrayArg("arrayPop", a);
         return arr.length === 0 ? null : arr[arr.length - 1];
@@ -399,25 +745,202 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
         const arr = arrayArg("arraySlice", a);
         const lo = Math.max(0, Math.trunc(num("arraySlice", start)));
         const hi = Math.min(arr.length, Math.trunc(num("arraySlice", end)));
+        const n = lo > hi ? 0 : hi - lo;
+        this.accountAlloc(48 + n * 32, nativeToken("arraySlice"));
         return lo > hi ? [] : arr.slice(lo, hi);
       },
-      arrayConcat: (...arrays) => arrays.flatMap((a) => arrayArg("arrayConcat", a)),
+      arrayConcat: (...arrays) => {
+        let total = 0;
+        for (const a of arrays) total += arrayArg("arrayConcat", a).length;
+        this.checkCollectionSize(total, nativeToken("arrayConcat"));
+        this.accountAlloc(48 + total * 32, nativeToken("arrayConcat"));
+        return arrays.flatMap((a) => arrayArg("arrayConcat", a));
+      },
       arrayIndexOf: (a, v) => arrayArg("arrayIndexOf", a).findIndex((x) => valuesEqual(x, v)),
-      objKeys: (o) => sortedKeys(objectArg("objKeys", o)),
+      arrayIncludes: (a, v) => arrayArg("arrayIncludes", a).some((x) => valuesEqual(x, v)),
+      arrayJoin: (a, sep) => {
+        const arr = arrayArg("arrayJoin", a);
+        const delim = sep === undefined ? "," : str("arrayJoin", sep);
+        if (arr.length === 0) return "";
+        const res = arr.map((el) => (typeof el === "string" ? el : this.stringify(el))).join(delim);
+        this.checkStringSize(this.utf8ByteLength(res), nativeToken("arrayJoin"));
+        return res;
+      },
+      arrayMap: (a, fn) => {
+        const arr = arrayArg("arrayMap", a);
+        this.checkCollectionSize(arr.length, nativeToken("arrayMap"));
+        const out = arr.map((el) => callCallback("arrayMap", fn, [el]));
+        this.accountAlloc(48 + out.length * 32, nativeToken("arrayMap"));
+        return out;
+      },
+      arrayFilter: (a, fn) => {
+        const arr = arrayArg("arrayFilter", a);
+        const out: any[] = [];
+        for (const el of arr) {
+          if (this.isTruthy(callCallback("arrayFilter", fn, [el]))) out.push(el);
+        }
+        this.accountAlloc(48 + out.length * 32, nativeToken("arrayFilter"));
+        return out;
+      },
+      arrayReduce: (a, fn, initial) => {
+        const arr = arrayArg("arrayReduce", a);
+        let acc = initial;
+        for (const el of arr) {
+          acc = callCallback("arrayReduce", fn, [acc, el]);
+        }
+        return acc;
+      },
+      arrayFind: (a, fn) => {
+        const arr = arrayArg("arrayFind", a);
+        for (const el of arr) {
+          if (this.isTruthy(callCallback("arrayFind", fn, [el]))) return el;
+        }
+        return null;
+      },
+      arraySort: (a, cmp) => {
+        const arr = arrayArg("arraySort", a);
+        let sorted: any[];
+        if (cmp !== undefined) {
+          if (!this.isCallable(cmp)) fail("arraySort", `expected function, got ${typeName(cmp)}`);
+          const expected = (cmp as PulsarCallable).arity();
+          if (expected >= 0 && expected !== 2) {
+            const cbName = cmp instanceof PulsarFunction && cmp.functionName ? cmp.functionName : "callback";
+            fail("arraySort", `${cbName} expects ${expected} args, got 2`);
+          }
+          sorted = mergeSort(arr, (x, y) => {
+            const res = callCallback("arraySort", cmp, [x, y]);
+            if (typeof res !== "number" || Number.isNaN(res)) {
+              fail("arraySort", `comparator must return a finite or numeric value, got ${typeName(res)}`);
+            }
+            return res < 0;
+          });
+        } else {
+          if (arr.length === 0) {
+            sorted = [];
+          } else {
+            const k0 = typeName(arr[0]);
+            if (k0 !== "number" && k0 !== "string") {
+              fail("arraySort", `default order only supports numbers or strings, got ${k0}`);
+            }
+            for (let i = 1; i < arr.length; i++) {
+              const ki = typeName(arr[i]);
+              if (ki !== k0) fail("arraySort", `cannot compare ${k0} and ${ki} without a comparator`);
+            }
+            if (k0 === "string") {
+              sorted = mergeSort(arr, (x, y) => compareStringsByCodePoint(x, y) < 0);
+            } else {
+              sorted = mergeSort(arr, (x, y) => {
+                const xn = Number.isNaN(x);
+                const yn = Number.isNaN(y);
+                if (xn || yn) return !xn && yn;
+                return x < y;
+              });
+            }
+          }
+        }
+        this.accountAlloc(48 + sorted.length * 32, nativeToken("arraySort"));
+        return sorted;
+      },
+      objKeys: (o) => {
+        const keys = sortedKeys(objectArg("objKeys", o));
+        this.accountAlloc(48 + keys.length * 32, nativeToken("objKeys"));
+        return keys;
+      },
       objValues: (o) => {
         const obj = objectArg("objValues", o);
-        return sortedKeys(obj).map((k) => obj.get(k));
+        const keys = sortedKeys(obj);
+        this.accountAlloc(48 + keys.length * 32, nativeToken("objValues"));
+        return keys.map((k) => obj.get(k));
       },
       objHas: (o, k) => objectArg("objHas", o).has(key(k)),
       objGet: (o, k) => objectArg("objGet", o).get(key(k)) ?? null,
-      objSet: (o, k, v) => new Map(objectArg("objSet", o)).set(key(k), v),
+      objSet: (o, k, v) => {
+        const obj = objectArg("objSet", o);
+        const ks = key(k);
+        const newLen = obj.has(ks) ? obj.size : obj.size + 1;
+        this.checkCollectionSize(newLen, nativeToken("objSet"));
+        this.accountAlloc(48 + newLen * 48, nativeToken("objSet"));
+        return new Map(obj).set(ks, v);
+      },
+      objDelete: (o, k) => {
+        const obj = objectArg("objDelete", o);
+        const ks = key(k);
+        if (!obj.has(ks)) return obj;
+        const next = new Map(obj);
+        next.delete(ks);
+        this.accountAlloc(48 + next.size * 48, nativeToken("objDelete"));
+        return next;
+      },
+      objEntries: (o) => {
+        const obj = objectArg("objEntries", o);
+        const keys = sortedKeys(obj);
+        this.checkCollectionSize(keys.length, nativeToken("objEntries"));
+        this.accountAlloc(48 + keys.length * 80, nativeToken("objEntries"));
+        return keys.map((k) => [k, obj.get(k)]);
+      },
+      objMerge: (...objects) => {
+        const merged = new Map<string, any>();
+        for (const o of objects) {
+          const obj = objectArg("objMerge", o);
+          for (const [k, v] of obj.entries()) {
+            if (!merged.has(k)) this.checkCollectionSize(merged.size + 1, nativeToken("objMerge"));
+            merged.set(k, v);
+          }
+        }
+        this.accountAlloc(48 + merged.size * 48, nativeToken("objMerge"));
+        return merged;
+      },
+      jsonParse: (s) => {
+        const text = str("jsonParse", s);
+        let raw: any;
+        try {
+          raw = JSON.parse(text);
+        } catch (e: any) {
+          fail("jsonParse", e?.message ?? "invalid JSON");
+        }
+        return convertParsedJSON(raw, 0);
+      },
+      jsonStringify: (v) => {
+        const res = serializeJSON(v, 0);
+        this.checkStringSize(this.utf8ByteLength(res), nativeToken("jsonStringify"));
+        return res;
+      },
       // Handlers
-      registerHandler: (name, fnName) => {
-        const fn = this.globals.getOwn(str("registerHandler", fnName));
-        if (!(fn instanceof PulsarFunction)) fail("registerHandler", `handler function not found: ${fnName}`);
-        this.handlers.set(str("registerHandler", name), fn as PulsarFunction);
+      registerHandler: (name, fnOrName) => {
+        const handlerKey = str("registerHandler", name);
+        if (fnOrName instanceof PulsarFunction) {
+          this.handlers.set(handlerKey, fnOrName);
+          return null;
+        }
+        const fn = this.globals.getOwn(str("registerHandler", fnOrName));
+        if (!(fn instanceof PulsarFunction)) fail("registerHandler", `handler function not found: ${fnOrName}`);
+        this.handlers.set(handlerKey, fn as PulsarFunction);
         return null;
       },
+      on: (eventName, fn) => {
+        const keyName = str("on", eventName);
+        if (!(fn instanceof PulsarFunction)) fail("on", `expected function, got ${typeName(fn)}`);
+        const list = this.eventListeners.get(keyName) ?? [];
+        list.push(fn);
+        this.eventListeners.set(keyName, list);
+        return null;
+      },
+      emit: (name, payload = null) => {
+        const eventName = str("emit", name);
+        const evt = new Map<string, any>([["name", eventName], ["payload", payload]]);
+        if (this.options.events) {
+          this.options.events.emit(toHost(evt));
+        }
+        return null;
+      },
+      sleep: (ms) => {
+        const dur = num("sleep", ms);
+        if (!Number.isFinite(dur) || dur < 0) {
+          fail("sleep", "argument 1 (ms) must be a finite non-negative number");
+        }
+        return null;
+      },
+      yield: () => null,
       // Host: key-value store
       kvGet: (k) => {
         const io = ensureIO("kvGet");
@@ -512,11 +1035,17 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       const { min, max } = arityRange(fn);
       const native: PulsarCallable = {
         arity: () => (min === max ? min : -1),
-        call: (_: Interpreter, args: any[]) => {
-          const arity = arityError(fn, args.length);
-          if (arity) throw this.createRuntimeError(nativeToken(fn.name), arity);
-          if (this.options.strictTypes) this.checkArgTypes(fn, args, nativeToken(fn.name));
-          return impl(...args);
+        call: (_: Interpreter, args: any[], callLine = 0) => {
+          const prevCallLine = this.currentCallLine;
+          this.currentCallLine = callLine;
+          try {
+            const arity = arityError(fn, args.length);
+            if (arity) throw this.createRuntimeError(nativeToken(fn.name), arity);
+            if (this.options.strictTypes) this.checkArgTypes(fn, args, nativeToken(fn.name));
+            return impl(...args);
+          } finally {
+            this.currentCallLine = prevCallLine;
+          }
         },
         toString: () => `<native ${fn.name}>`,
       };
@@ -541,6 +1070,30 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     return [...this.handlers.keys()];
   }
 
+  /** Names registered with on(), sorted alphabetically (LANG-10). */
+  eventListenerNames(): string[] {
+    return [...this.eventListeners.keys()].filter((k) => (this.eventListeners.get(k)?.length ?? 0) > 0).sort();
+  }
+
+  /** Invokes all listeners registered for an event via on(), in registration order (LANG-10). */
+  dispatchEvent(name: string, payload: any = null): void {
+    const orig = this.eventListeners.get(name);
+    if (!orig || orig.length === 0) return;
+    const listeners = [...orig];
+    this.resetBudget();
+    const arg = fromHost(payload);
+    for (const fn of listeners) {
+      const arity = fn.arity();
+      if (arity === 0) {
+        fn.call(this, []);
+      } else if (arity === 1) {
+        fn.call(this, [arg]);
+      } else {
+        throw new Error(`event ${name} listener expects 0 or 1 args, got ${arity}`);
+      }
+    }
+  }
+
   /** Invokes a registered handler with fresh budgets; throws RuntimeError or BudgetError. */
   callHandler(name: string, args: any[] = []): any {
     const fn = this.handlers.get(name);
@@ -553,6 +1106,134 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   private resetBudget(): void {
     this.steps = 0;
     this.deadline = this.limits.timeoutMs > 0 && Number.isFinite(this.limits.timeoutMs) ? Date.now() + this.limits.timeoutMs : Infinity;
+  }
+
+  private utf8ByteLength(s: string): number {
+    if (typeof Buffer !== "undefined") return Buffer.byteLength(s, "utf8");
+    return this.textEncoder.encode(s).length;
+  }
+
+  private memLimitError(token: Token | undefined, message: string): MemoryLimitError {
+    const tok = token ?? ({ type: TokenType.IDENTIFIER, lexeme: "", literal: null, line: 0 } as Token);
+    return new MemoryLimitError(tok, message, [...this.callStack]);
+  }
+
+  protected checkStringSize(byteLen: number, token?: Token): void {
+    const maxStr = this.limits.maxStringBytes;
+    if (maxStr > 0 && Number.isFinite(maxStr) && byteLen > maxStr) {
+      throw this.memLimitError(token, `string length ${byteLen} exceeds limit of ${maxStr} bytes`);
+    }
+    this.accountAlloc(byteLen + 16, token);
+  }
+
+  protected checkCollectionSize(len: number, token?: Token): void {
+    const maxLen = this.limits.maxCollectionLen;
+    if (maxLen > 0 && Number.isFinite(maxLen) && len > maxLen) {
+      throw this.memLimitError(token, `collection length ${len} exceeds limit of ${maxLen} elements`);
+    }
+  }
+
+  protected accountAlloc(deltaBytes: number, token?: Token): void {
+    const maxMem = this.limits.maxMemoryBytes;
+    if (!(maxMem > 0 && Number.isFinite(maxMem))) return;
+    this.memBytes += deltaBytes;
+    if (this.memBytes > maxMem) {
+      const liveBytes = this.recomputeLiveMemory();
+      this.memBytes = liveBytes + deltaBytes;
+      if (this.memBytes > maxMem) {
+        throw this.memLimitError(token, `allocated memory ${this.memBytes} exceeds limit of ${maxMem} bytes`);
+      }
+    }
+  }
+
+  protected accountValue(root: any, token?: Token): any {
+    const maxStr = this.limits.maxStringBytes;
+    const maxLen = this.limits.maxCollectionLen;
+    const maxMem = this.limits.maxMemoryBytes;
+    const hasStr = maxStr > 0 && Number.isFinite(maxStr);
+    const hasLen = maxLen > 0 && Number.isFinite(maxLen);
+    const hasMem = maxMem > 0 && Number.isFinite(maxMem);
+    if (!hasStr && !hasLen && !hasMem) return root;
+
+    let bytes = 0;
+    const seen = new Set<any>();
+    const stack: any[] = [root];
+    while (stack.length > 0) {
+      const v = stack.pop();
+      if (typeof v === "string") {
+        const b = this.utf8ByteLength(v);
+        if (hasStr && b > maxStr) {
+          throw this.memLimitError(token, `string length ${b} exceeds limit of ${maxStr} bytes`);
+        }
+        bytes += b + 16;
+      } else if (isArray(v)) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        if (hasLen && v.length > maxLen) {
+          throw this.memLimitError(token, `collection length ${v.length} exceeds limit of ${maxLen} elements`);
+        }
+        bytes += 48 + v.length * 32;
+        for (const el of v) stack.push(el);
+      } else if (isObject(v)) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        if (hasLen && v.size > maxLen) {
+          throw this.memLimitError(token, `collection length ${v.size} exceeds limit of ${maxLen} elements`);
+        }
+        bytes += 48 + v.size * 48;
+        for (const [k, val] of v.entries()) {
+          bytes += this.utf8ByteLength(k) + 16;
+          stack.push(val);
+        }
+      }
+    }
+    this.accountAlloc(bytes, token);
+    return root;
+  }
+
+  private recomputeLiveMemory(): number {
+    let bytes = 0;
+    const seen = new Set<any>();
+    const stack: any[] = [];
+    const visitEnv = (env: Environment | null) => {
+      while (env && !seen.has(env)) {
+        seen.add(env);
+        for (const val of (env as any).values.values()) {
+          stack.push(val);
+        }
+        env = env.enclosing;
+      }
+    };
+    visitEnv(this.environment);
+    visitEnv(this.globals);
+    for (const fn of this.handlers.values()) {
+      visitEnv((fn as any).closure ?? null);
+    }
+    while (stack.length > 0) {
+      const v = stack.pop();
+      if (typeof v === "string") {
+        bytes += this.utf8ByteLength(v) + 16;
+      } else if (isArray(v)) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        bytes += 48 + v.length * 32;
+        for (const el of v) stack.push(el);
+      } else if (isObject(v)) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        bytes += 48 + v.size * 48;
+        for (const [k, val] of v.entries()) {
+          bytes += this.utf8ByteLength(k) + 16;
+          stack.push(val);
+        }
+      } else if (v && typeof v === "object" && "closure" in v) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        bytes += 64;
+        visitEnv(v.closure);
+      }
+    }
+    return bytes;
   }
 
   /** Counts one step and enforces the step and time budgets (D10). */
@@ -573,12 +1254,25 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     this.callStack.push(frame);
   }
 
-  interpret(statements: Stmt[]): void {
+  interpret(statements: Stmt[], sources: string[] = []): void {
+    this.sources = sources;
+    this.currentFileIndex = 0;
     this.resetBudget();
     try {
       // Hoist top-level functions so they can be called before their declaration (SPEC 4.6, D2).
-      for (const statement of statements) {
-        if (statement instanceof FunctionStmt) this.execute(statement);
+      for (const raw of statements) {
+        const statement = raw instanceof ExportStmt && raw.declaration ? raw.declaration : raw;
+        if (statement instanceof FunctionStmt) {
+          const prevFile = this.currentFileIndex;
+          if (typeof (raw as any).sourceIndex === "number") {
+            this.currentFileIndex = (raw as any).sourceIndex;
+          }
+          try {
+            this.execute(statement);
+          } finally {
+            this.currentFileIndex = prevFile;
+          }
+        }
       }
       for (const statement of statements) {
         this.execute(statement);
@@ -647,8 +1341,16 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     const iterable = this.evaluate(stmt.iterable);
     let items: any[];
     if (isArray(iterable)) items = iterable;
-    else if (isObject(iterable)) items = sortedKeys(iterable);
-    else if (typeof iterable === "string") items = Array.from(iterable);
+    else if (isObject(iterable)) {
+      this.checkCollectionSize(iterable.size, stmt.name);
+      this.accountAlloc(48 + iterable.size * 32, stmt.name);
+      items = sortedKeys(iterable);
+    }
+    else if (typeof iterable === "string") {
+      items = Array.from(iterable);
+      this.checkCollectionSize(items.length, stmt.name);
+      this.accountAlloc(48 + items.length * 48, stmt.name);
+    }
     else throw this.createRuntimeError(stmt.name, `for...of needs an array, object or string, got ${typeName(iterable)}`);
 
     const previous = this.environment;
@@ -706,12 +1408,18 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       if (typeof key !== "string") {
         throw this.createRuntimeError(expr.token, `object keys must be strings, got ${typeName(key)}`);
       }
+      const newLen = container.has(key) ? container.size : container.size + 1;
+      this.checkCollectionSize(newLen, expr.token);
+      this.accountAlloc(48 + newLen * 48, expr.token);
       const next = new Map(container);
       next.set(key, value);
       return next;
     }
     if (isArray(container) && !expr.member) {
       const i = this.indexOf(key, container.length, expr.token, true);
+      const newLen = i === container.length ? container.length + 1 : container.length;
+      this.checkCollectionSize(newLen, expr.token);
+      this.accountAlloc(48 + newLen * 32, expr.token);
       const next = container.slice();
       next[i] = value;
       return next;
@@ -720,21 +1428,58 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   visitSetIndexExpr(expr: SetIndex): any {
-    // Evaluate the innermost container and key, then the value, as the compiler does.
-    let target = expr.target;
-    let container = this.evaluate(target.object);
-    let key = this.evaluate(target.index);
-    let updated = this.withElement(container, key, this.evaluate(expr.value), target);
-    // Store the copy back up the chain: a[i][j] = v -> a[i] = (a[i] with j = v) -> a = ...
-    while (!(target.object instanceof Variable)) {
-      const parent = target.object as IndexExpr;
-      container = this.evaluate(parent.object);
-      key = this.evaluate(parent.index);
-      updated = this.withElement(container, key, updated, parent);
-      target = parent;
+    // Unwind root.a.b[k] into root and steps [a, b, k] so every key expression evaluates once.
+    const steps: IndexExpr[] = [];
+    let node: Expr = expr.target;
+    while (node instanceof IndexExpr) {
+      steps.push(node);
+      node = node.object;
     }
-    this.environment.assign((target.object as Variable).name, updated);
+    steps.reverse();
+    const rootVar = node as Variable;
+
+    const keys = steps.map((s) => this.evaluate(s.index));
+    const rootVal = this.environment.get(rootVar.name);
+    const containers: any[] = new Array(steps.length);
+    let cur = rootVal;
+    for (let i = 0; i < steps.length; i++) {
+      containers[i] = cur;
+      if (i < steps.length - 1 || expr.operator !== null) {
+        cur = this.readElement(cur, keys[i], steps[i]);
+      }
+    }
+
+    const rhs = this.evaluate(expr.value);
+    const leafValue = expr.operator !== null ? this.applyBinaryOp(expr.operator, cur, rhs) : rhs;
+
+    let updated = leafValue;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      updated = this.withElement(containers[i], keys[i], updated, steps[i]);
+    }
+    this.environment.assign(rootVar.name, updated);
     return null;
+  }
+
+  visitTernaryExpr(expr: TernaryExpr): any {
+    if (this.isTruthy(this.evaluate(expr.condition))) {
+      return this.evaluate(expr.thenBranch);
+    }
+    return this.evaluate(expr.elseBranch);
+  }
+
+  visitTemplateLiteralExpr(expr: TemplateLiteralExpr): any {
+    let out = "";
+    for (const part of expr.parts) {
+      const piece = this.stringify(this.evaluate(part));
+      this.checkStringSize(this.utf8ByteLength(out) + this.utf8ByteLength(piece), expr.token);
+      out += piece;
+    }
+    return out;
+  }
+
+  visitFunctionExpr(expr: FunctionExpr): any {
+    this.accountAlloc(64, expr.keyword);
+    return new PulsarFunction(expr, this.environment);
   }
 
   visitForStmt(stmt: ForStmt): void {
@@ -815,14 +1560,17 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
 
     const left = this.evaluate(expr.left);
     const right = this.evaluate(expr.right);
+    return this.applyBinaryOp(expr.operator, left, right);
+  }
 
-    switch (expr.operator.type) {
+  private applyBinaryOp(operator: Token, left: any, right: any): any {
+    switch (operator.type) {
       case TokenType.MINUS:
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) - (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) - Number(right);
       case TokenType.PLUS:
         // Adds two numbers; concatenates printed forms when either side is a string (SPEC §4.2, D6).
@@ -830,63 +1578,78 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
           return left + right;
         }
         if (typeof left === 'string' || typeof right === 'string') {
-          return this.stringify(left) + this.stringify(right);
+          const ls = typeof left === "string" ? left : this.stringify(left);
+          const rs = typeof right === "string" ? right : this.stringify(right);
+          this.checkStringSize(this.utf8ByteLength(ls) + this.utf8ByteLength(rs), operator);
+          return ls + rs;
         }
-        throw this.createRuntimeError(expr.operator, "Operands must be two numbers, or include a string.");
+        throw this.createRuntimeError(operator, "Operands must be two numbers, or include a string.");
       case TokenType.PERCENT:
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         if ((right as number) === 0) {
-          throw this.createRuntimeError(expr.operator, "modulo by zero");
+          throw this.createRuntimeError(operator, "modulo by zero");
         }
         // Remainder with the sign of the dividend, as in C, Go and JavaScript.
         return (left as number) % (right as number);
       case TokenType.SLASH:
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           if ((right as number) === 0) {
-            throw this.createRuntimeError(expr.operator, "Division by zero.");
+            throw this.createRuntimeError(operator, "Division by zero.");
           }
           return (left as number) / (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         if (Number(right) === 0) {
-          throw this.createRuntimeError(expr.operator, "Division by zero.");
+          throw this.createRuntimeError(operator, "Division by zero.");
         }
         return Number(left) / Number(right);
       case TokenType.STAR:
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) * (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) * Number(right);
       case TokenType.GREATER:
+        if (typeof left === "string" && typeof right === "string") {
+          return compareStringsByCodePoint(left, right) > 0;
+        }
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) > (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) > Number(right);
       case TokenType.GREATER_EQUAL:
+        if (typeof left === "string" && typeof right === "string") {
+          return compareStringsByCodePoint(left, right) >= 0;
+        }
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) >= (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) >= Number(right);
       case TokenType.LESS:
+        if (typeof left === "string" && typeof right === "string") {
+          return compareStringsByCodePoint(left, right) < 0;
+        }
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) < (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) < Number(right);
       case TokenType.LESS_EQUAL:
+        if (typeof left === "string" && typeof right === "string") {
+          return compareStringsByCodePoint(left, right) <= 0;
+        }
         if (this.options.strictTypes) {
-          this.checkNumberOperands(expr.operator, left, right);
+          this.checkNumberOperands(operator, left, right);
           return (left as number) <= (right as number);
         }
-        this.checkNumberOperands(expr.operator, left, right);
+        this.checkNumberOperands(operator, left, right);
         return Number(left) <= Number(right);
       case TokenType.BANG_EQUAL:
         return !this.isEqual(left, right);
@@ -928,24 +1691,37 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
       );
     }
 
+    const at = expr.callee instanceof Variable ? expr.callee.name : expr.paren;
     try {
-      return func.call(this, args);
+      return func.call(this, args, at.line);
     } catch (err) {
+      if (err instanceof MemoryLimitError && !(err.token?.line > 0)) {
+        const at = expr.callee instanceof Variable ? expr.callee.name : expr.paren;
+        const wrapped = new MemoryLimitError(at, err.message, err.callStack);
+        (wrapped as any).sourceFile = (err as any).sourceFile ?? this.currentSourceFile();
+        throw wrapped;
+      }
       // Built-ins raise errors without a source position; report them at the call.
-      if (err instanceof RuntimeError && !(err.token?.line > 0) && !(err instanceof BudgetError)) {
+      if (err instanceof RuntimeError && !(err.token?.line > 0) && !(err instanceof BudgetError) && !(err instanceof MemoryLimitError)) {
         // The line of the function name, as the VM's line map reports it (D18).
         const at = expr.callee instanceof Variable ? expr.callee.name : expr.paren;
-        throw new RuntimeError(at, err.message, err.callStack);
+        const wrapped = new RuntimeError(at, err.message, err.callStack);
+        (wrapped as any).sourceFile = (err as any).sourceFile ?? this.currentSourceFile();
+        throw wrapped;
       }
       throw err;
     }
   }
 
   visitArrayExpr(expr: ArrayExpr): any {
+    this.checkCollectionSize(expr.elements.length);
+    this.accountAlloc(48 + expr.elements.length * 32);
     return expr.elements.map((e) => this.evaluate(e));
   }
 
   visitObjectExpr(expr: ObjectExpr): any {
+    this.checkCollectionSize(expr.properties.length);
+    this.accountAlloc(48 + expr.properties.length * 48);
     const obj = new Map<string, any>();
     for (const prop of expr.properties) {
       obj.set(prop.key, this.evaluate(prop.value));
@@ -957,8 +1733,8 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     try {
       this.executeBlock(stmt.tryBlock, new Environment(this.environment));
     } catch (err) {
-      // `return` inside try is not an error (D19), and budgets cannot be caught (D10).
-      if (err instanceof ReturnException || err instanceof BudgetError || err instanceof LoopSignal) throw err;
+      // `return` inside try is not an error (D19), and budgets/memory caps cannot be caught (D10, LANG-01).
+      if (err instanceof ReturnException || err instanceof BudgetError || err instanceof MemoryLimitError || err instanceof LoopSignal) throw err;
       const env = new Environment(this.environment);
       if (stmt.catchParam) {
         env.define(stmt.catchParam, this.errorToValue(err));
@@ -984,17 +1760,53 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     }
   }
 
+  visitImportStmt(stmt: ImportStmt): void {
+    throw this.createRuntimeError(stmt.keyword, "Imports must be resolved before running.");
+  }
+
+  visitExportStmt(stmt: ExportStmt): void {
+    if (stmt.declaration) {
+      this.execute(stmt.declaration);
+    }
+  }
+
   popCallFrame(): void {
     this.callStack.pop();
   }
 
+  currentSourceFile(): string | undefined {
+    return this.sources.length > 1 ? this.sources[this.currentFileIndex] : undefined;
+  }
+
+  enterFile(sourceIndex?: number): number {
+    const prev = this.currentFileIndex;
+    if (typeof sourceIndex === "number") {
+      this.currentFileIndex = sourceIndex;
+    }
+    return prev;
+  }
+
+  exitFile(prev: number): void {
+    this.currentFileIndex = prev;
+  }
+
   createRuntimeError(token: Token, message: string): RuntimeError {
-    return new RuntimeError(token, message, [...this.callStack]);
+    const err = new RuntimeError(token, message, [...this.callStack]);
+    (err as any).sourceFile = this.currentSourceFile();
+    return err;
   }
 
   private execute(stmt: Stmt): void {
     this.tick();
-    stmt.accept(this);
+    const prevFile = this.currentFileIndex;
+    if (typeof (stmt as any).sourceIndex === "number") {
+      this.currentFileIndex = (stmt as any).sourceIndex;
+    }
+    try {
+      stmt.accept(this);
+    } finally {
+      this.currentFileIndex = prevFile;
+    }
   }
 
   private evaluate(expr: Expr): any {
@@ -1038,15 +1850,17 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
   }
 
   /**
-   * The value bound by catch (SPEC §7, D7): an object {kind: "runtime", line, message}.
+   * The value bound by catch (SPEC §7, D7, LANG-06): {kind: "runtime", line, message, stack}.
    * `line` is nil when the position is unknown.
    */
   private errorToValue(err: any): Map<string, any> {
     let line: number | null = null;
     let message: string;
+    let frames: CallFrame[] = [];
     if (err instanceof RuntimeError) {
       message = err.message;
       line = err.token?.line > 0 ? err.token.line : null;
+      frames = err.callStack ?? [];
     } else if (err instanceof RangeError) {
       message = "Stack overflow.";
     } else if (err instanceof Error) {
@@ -1054,6 +1868,22 @@ export class Interpreter implements ExprVisitor<any>, StmtVisitor<void> {
     } else {
       message = this.stringify(err);
     }
-    return new Map<string, any>([["kind", "runtime"], ["line", line], ["message", message]]);
+    const displayName = (n: string): string => n.replace(/^__m\d+\$/, "");
+    const formatLoc = (file: string | undefined, ln: number | null): string => {
+      if (file && ln !== null && ln > 0) return `${file}:${ln}`;
+      if (ln !== null && ln > 0) return `line ${ln}`;
+      return "";
+    };
+    const errFile: string | undefined = err?.sourceFile ?? this.currentSourceFile();
+    const stack: string[] = [];
+    const activeName = frames.length > 0 ? displayName(frames[frames.length - 1].functionName) : "<script>";
+    const activeLoc = formatLoc(errFile, line);
+    stack.push(activeLoc ? `${activeName} (${activeLoc})` : activeName);
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const caller = i === 0 ? "<script>" : displayName(frames[i - 1].functionName);
+      const callLoc = formatLoc(frames[i].callFile, frames[i].callLine ?? frames[i].line);
+      stack.push(callLoc ? `${caller} (${callLoc})` : caller);
+    }
+    return new Map<string, any>([["kind", "runtime"], ["line", line], ["message", message], ["stack", stack]]);
   }
 }

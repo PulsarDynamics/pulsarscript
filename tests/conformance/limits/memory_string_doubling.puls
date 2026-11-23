@@ -1,0 +1,11 @@
+// Doubling a string past the 16 MiB limit fails with an uncatchable memory limit error (LANG-01, N1).
+var s = "a";
+try {
+  for (var i = 0; i < 30; i += 1) {
+    s = s + s;
+  }
+  print("completed");
+} catch (e) {
+  print("caught");
+}
+print("unreachable");

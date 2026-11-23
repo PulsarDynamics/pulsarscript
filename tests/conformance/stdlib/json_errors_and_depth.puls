@@ -1,0 +1,21 @@
+try { jsonParse("{bad}"); } catch (e) { print(e.kind); }
+try { jsonParse("1 2"); } catch (e) { print(e.kind); }
+try { jsonStringify(sqrt(-1)); } catch (e) { print(e.kind); }
+try { jsonStringify(function() { return 1; }); } catch (e) { print(e.kind); }
+var deep = "[";
+var close = "]";
+var i = 0;
+while (i < 66) {
+  deep = deep + "[";
+  close = close + "]";
+  i = i + 1;
+}
+try { jsonParse(deep + "1" + close); } catch (e) { print(e.kind); }
+var nested = [1];
+var k = 0;
+while (k < 66) {
+  nested = [nested];
+  k = k + 1;
+}
+try { jsonStringify(nested); } catch (e) { print(e.kind); }
+

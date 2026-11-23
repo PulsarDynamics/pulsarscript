@@ -1,0 +1,1 @@
+print(`outer(${`inner(${2 * 3})`})`);

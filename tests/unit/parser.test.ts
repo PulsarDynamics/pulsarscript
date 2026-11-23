@@ -124,8 +124,12 @@ describe("parser: errors (D13)", () => {
     expect(fail(`f(${args});`).message).toBe("Can't have more than 255 arguments.");
   });
 
-  test("an exponent literal is a syntax error, not a silently dropped statement", () => {
-    expect(fail("print(1e3);").message).toBe("Expect ')' after expression.");
+  test("scientific and hex literals parse, malformed ones are errors", () => {
+    expect((expr("1e3") as Literal).value).toBe(1000);
+    expect((expr("1.5e-2") as Literal).value).toBe(0.015);
+    expect((expr("0xff") as Literal).value).toBe(255);
+    expect(() => parse("print(1e);")).toThrow(/Invalid exponent/);
+    expect(() => parse("print(0x);")).toThrow(/Invalid hex/);
   });
 
   test("valid programs still parse", () => {

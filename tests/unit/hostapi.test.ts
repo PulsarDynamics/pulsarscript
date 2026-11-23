@@ -4,7 +4,7 @@ import { Lexer } from "../../Lexer";
 import { Parser } from "../../Parser";
 import { SemanticAnalyzer } from "../../SemanticAnalyzer";
 import { BytecodeCompiler } from "../../BytecodeCompiler";
-import { BudgetError, Interpreter, RuntimeError } from "../../Interpreter";
+import { BudgetError, Interpreter, MemoryLimitError, RuntimeError } from "../../Interpreter";
 
 const parse = (src: string) => new Parser(new Lexer(src).scanTokens()).parse();
 
@@ -58,5 +58,39 @@ describe("budgets (D10)", () => {
     interp.interpret(parse('function ping(x) { return concat("pong ", x); } registerHandler("ping", "ping");'));
     expect(interp.handlerNames()).toEqual(["ping"]);
     for (let i = 0; i < 5; i++) expect(interp.callHandler("ping", [i])).toBe(`pong ${i}`);
+  });
+
+  test("memory limits stop allocation bombs and cannot be caught (LANG-01)", () => {
+    const strInterp = new Interpreter({ limits: { maxStringBytes: 1024 } });
+    expect(() =>
+      strInterp.interpret(parse('var s = "a"; try { for (var i = 0; i < 20; i += 1) { s = s + s; } } catch (e) { print(1); }'))
+    ).toThrow(MemoryLimitError);
+
+    const colInterp = new Interpreter({ limits: { maxCollectionLen: 5 } });
+    expect(() => colInterp.interpret(parse("try { var a = [1, 2, 3, 4, 5, 6]; } catch (e) { print(1); }"))).toThrow(MemoryLimitError);
+
+    const ioInterp = new Interpreter({
+      limits: { maxStringBytes: 50 },
+      io: { readFile: () => "x".repeat(100), writeFile: () => true, listDir: () => [] },
+    });
+    expect(() => ioInterp.interpret(parse('fsRead("big.txt");'))).toThrow(MemoryLimitError);
+  });
+});
+
+describe("deprecation policy (LANG-15)", () => {
+  test("SemanticAnalyzer records a warning when calling a deprecated host function", () => {
+    const entry = lookupHostFunction("emitEvent")!;
+    entry.deprecated = "use emit(name, payload) instead";
+    try {
+      const stmts = parse('emitEvent("ok");');
+      const analyzer = new SemanticAnalyzer();
+      analyzer.analyze(stmts);
+      expect(analyzer.warnings.length).toBe(1);
+      expect(analyzer.warnings[0].line).toBe(1);
+      expect(analyzer.warnings[0].message).toContain("emitEvent is deprecated");
+      expect(analyzer.warnings[0].message).toContain("use emit(name, payload) instead");
+    } finally {
+      delete entry.deprecated;
+    }
   });
 });

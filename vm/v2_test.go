@@ -66,14 +66,14 @@ func TestElementHelpers(t *testing.T) {
 
 	// Writing copies and leaves the original alone.
 	next, err := withElement(arr, Number(2), Number(3), false)
-	if err != nil || len(next.arr) != 3 || len(arr.arr) != 2 {
+	if err != nil || next.arrayLen() != 3 || arr.arrayLen() != 2 {
 		t.Fatalf("append: next=%v err=%v original=%v", next, err, arr)
 	}
 	if _, err := withElement(arr, Number(5), Number(3), false); err == nil {
 		t.Fatal("writing past len should fail")
 	}
 	nobj, _ := withElement(obj, String("b"), Number(2), true)
-	if len(nobj.obj) != 2 || len(obj.obj) != 1 {
+	if nobj.objectLen() != 2 || obj.objectLen() != 1 {
 		t.Fatalf("object write: next=%v original=%v", nobj, obj)
 	}
 	if _, err := withElement(String("abc"), Number(0), String("x"), false); err == nil {

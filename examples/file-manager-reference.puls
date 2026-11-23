@@ -1,0 +1,46 @@
+// Reference File Manager Pro script (LANG-13):
+// - RPC handlers with cursor pagination for UI operations ("listSorted", "planRename", "applyRenamePage")
+// - Service watcher using on("fs.change", ...) and emit("watcher.summary", ...)
+
+import { sortEntries, planBatchRename, summarizeChanges } from "./file-manager-utils.puls";
+
+var watcherQueue = [];
+
+registerHandler("listSorted", function(path, by, asc) {
+  var raw = fsList(path);
+  return sortEntries(raw, by, asc);
+});
+
+registerHandler("planRename", function(dirPath, findStr, replaceStr, prefix) {
+  var raw = fsList(dirPath);
+  var all = planBatchRename(dirPath, raw, findStr, replaceStr, prefix);
+  return arrayFilter(all, function(item) { return item.changed; });
+});
+
+registerHandler("applyRenamePage", function(plan, cursor, pageSize) {
+  var total = len(plan);
+  var start = cursor < 0 ? 0 : cursor;
+  var end = start + pageSize;
+  if (end > total) end = total;
+  var slice = arraySlice(plan, start, end);
+  var moved = 0;
+  for (var item of slice) {
+    if (fsRename(item.from, item.to)) {
+      moved = moved + 1;
+    }
+  }
+  return {
+    moved: moved,
+    nextCursor: end,
+    done: end >= total
+  };
+});
+
+on("fs.change", function(ev) {
+  watcherQueue[len(watcherQueue)] = ev;
+  if (ev.flush || len(watcherQueue) >= 4) {
+    var summary = summarizeChanges(watcherQueue);
+    watcherQueue = [];
+    emit("watcher.summary", summary);
+  }
+});

@@ -1,0 +1,2 @@
+import { a } from "./.fixtures/cycle_a.puls";
+print(a);

@@ -1,0 +1,7 @@
+/* Leading multi-line block comment
+   spanning multiple lines
+*/
+var x = 10 /* inline */ + /* another */ 5;
+print(x);
+/* // nested line comment stays inside block comment */
+print("ok");

@@ -1,0 +1,8 @@
+print(charCodeAt("A😀B", 0));
+print(charCodeAt("A😀B", 1));
+print(charCodeAt("A😀B", 2));
+print(charCodeAt("A😀B", 3));
+print(charCodeAt("A😀B", -1));
+print(fromCharCode(65));
+print(fromCharCode(128512) == "😀");
+

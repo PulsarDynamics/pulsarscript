@@ -1,0 +1,4 @@
+var trace = [];
+function step(n) { trace[len(trace)] = n; return n; }
+print(`${step(1)}-${step(2)}-${step(3)}`);
+print(trace);

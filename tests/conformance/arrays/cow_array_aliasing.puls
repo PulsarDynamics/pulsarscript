@@ -1,0 +1,30 @@
+// Value semantics with CoW backing: aliases remain isolated across appends, overwrites, and ping-pong.
+function testCoW() {
+  var a = [1, 2, 3];
+  var b = a;
+  b[0] = 99;
+  b[len(b)] = 4;
+  var c = a;
+  c[len(c)] = 10;
+  print(a);
+  print(b);
+  print(c);
+
+  // Ping-pong reads and writes between two branches.
+  var x = [0];
+  var y = x;
+  for (var i = 1; i <= 5; i += 1) {
+    x[0] = i;
+    y[0] = -i;
+  }
+  print(x[0]);
+  print(y[0]);
+
+  // Self-containment.
+  var orig = [1, 2];
+  var s = orig;
+  s[0] = s;
+  print(s);
+  print(orig);
+}
+testCoW();

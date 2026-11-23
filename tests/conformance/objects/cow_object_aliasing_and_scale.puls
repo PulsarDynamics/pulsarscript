@@ -1,0 +1,19 @@
+// Object value semantics with CoW backing and 1,500-key construction.
+var o = {a: 1, b: 2};
+var snap = o;
+o.c = 3;
+o.a = 99;
+print(snap);
+print(o);
+
+function buildObj(n) {
+  var m = {};
+  for (var i = 0; i < n; i += 1) {
+    m["k" + i] = i;
+  }
+  return m;
+}
+var big = buildObj(1500);
+print(len(objKeys(big)));
+print(objGet(big, "k0"));
+print(objGet(big, "k1499"));

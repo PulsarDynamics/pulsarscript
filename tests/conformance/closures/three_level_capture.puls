@@ -1,0 +1,10 @@
+function a(x) {
+  return function b(y) {
+    return function c(z) {
+      return function d() {
+        return x + y + z;
+      };
+    };
+  };
+}
+print(a(1)(20)(300)());

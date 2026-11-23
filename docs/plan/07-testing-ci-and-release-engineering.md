@@ -19,7 +19,7 @@ Every repo now blocks a PR that breaks its build or tests; none blocks a PR that
 | Service tests on Postgres | — | **new** | — | OPS-02, G2 |
 | Fuzzing, short on PRs and nightly | **new** (loader, then parser and compiler) | — | — | LANG-02, G2; LANG-14, G7 |
 | Browser end-to-end, Chromium and Firefox | — | **new**, required | **new**, required | QA-02, G3 |
-| Contract checks: registry and manifest fixtures | **new** | **new** | **new** | APP-04, G3 |
+| Contract checks: registry, OpenSpec & manifest fixtures | **new** | **new** (`openspec validate --all --strict`) | **new** | APP-04, G3 |
 | Built bundle holds no admin variable names | — | — | **new** | FE-01, G3 |
 | Smoke test of all 41 apps | — | — | **new** | QA-04, HT |
 | Benchmarks tracked nightly | **new** | — | — | LANG-08, G4 |
@@ -46,7 +46,7 @@ Targets are for the ratchet, which only moves up. They are goals for planning, n
 | Repo | Today | End of G3 | End of G7 |
 | --- | --- | --- | --- |
 | API statements | 26.5%; 25 packages with no tests | 40%; every App Store package has tests | 55%; no package that handles a request is at zero |
-| PulsarScript conformance cases | 159 after #18 | 165 or more (memory limits) | 250 or more by G4, growing with every host call |
+| PulsarScript conformance cases | 159 after #18 | 165 or more (memory limits) | 280 or more by G4, growing with every host call |
 | Frontend unit cases | 121 after #60 | 140 or more | growth tied to FE-11's areas |
 | Frontend browser tests | 0 | Main scenario plus sandbox assertions | plus all 41 apps |
 
@@ -81,8 +81,8 @@ PulsarScript has one release (`vm/v0.4.0`). The API and the frontend have none, 
 | --- | --- |
 | Bytecode format | Bytecode version; the VM keeps reading N and N−1 (LANG-15) |
 | Host API registry | Minor version of PulsarScript for an addition; a removal follows the deprecation process |
-| `AppManifest.json` schema | Additive changes only inside v1 |
-| App SDK protocol | SDK version, negotiated at `app.ready` (APP-03) |
+| `AppManifest.json` schema | Additive changes only inside v1 (e.g. `fileTypes` in `APP-09`) |
+| App SDK protocol | SDK version, negotiated at `app.ready` (APP-03; `1.1.0` adds `APP-09`/`APP-10`) |
 | HTTP routes | Additive inside a major API version; the `{"data": …}` reply shape does not change |
 
 ## The cross-repo merge routine

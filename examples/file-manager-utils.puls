@@ -1,0 +1,82 @@
+// Shared helpers for File Manager reference script (LANG-13).
+
+export function splitExt(name) {
+  var dot = lastIndexOf(name, ".");
+  if (dot <= 0) {
+    return { stem: name, ext: "" };
+  }
+  return {
+    stem: substr(name, 0, dot),
+    ext: substr(name, dot, len(name) - dot)
+  };
+}
+
+export function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${round(bytes / 102.4) / 10} KB`;
+  return `${round(bytes / 104857.6) / 10} MB`;
+}
+
+function entryIsDir(e) {
+  return !!(e.dir || e.isDir);
+}
+
+export function sortEntries(entries, by, asc) {
+  var dir = asc ? 1 : -1;
+  if (by == "size") {
+    return arraySort(entries, function(a, b) {
+      var da = a.dir || a.isDir;
+      var db = b.dir || b.isDir;
+      if (da != db) return da ? -1 : 1;
+      var sa = a.size == nil ? 0 : a.size;
+      var sb = b.size == nil ? 0 : b.size;
+      if (sa != sb) return sa < sb ? -dir : dir;
+      return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+    });
+  }
+  if (by == "modified") {
+    return arraySort(entries, function(a, b) {
+      var da = a.dir || a.isDir;
+      var db = b.dir || b.isDir;
+      if (da != db) return da ? -1 : 1;
+      var ma = a.modified == nil ? 0 : a.modified;
+      var mb = b.modified == nil ? 0 : b.modified;
+      if (ma != mb) return ma < mb ? -dir : dir;
+      return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+    });
+  }
+  return arraySort(entries, function(a, b) {
+    if ((a.dir || a.isDir) != (b.dir || b.isDir)) {
+      return (a.dir || a.isDir) ? -1 : 1;
+    }
+    return a.name < b.name ? -dir : (a.name > b.name ? dir : 0);
+  });
+}
+
+export function planBatchRename(dirPath, entries, findStr, replaceStr, prefix) {
+  var slash = endsWith(dirPath, "/") ? "" : "/";
+  var files = arrayFilter(entries, function(e) { return !entryIsDir(e); });
+  return arrayMap(files, function(e) {
+    var base = prefix + (findStr == "" ? e.name : replace(e.name, findStr, replaceStr));
+    return {
+      from: `${dirPath}${slash}${e.name}`,
+      to: `${dirPath}${slash}${base}`,
+      changed: base != e.name
+    };
+  });
+}
+
+export function summarizeChanges(events) {
+  var visible = arrayFilter(events, function(ev) {
+    return !startsWith(ev.name, ".");
+  });
+  var totalBytes = arrayReduce(visible, function(acc, ev) {
+    return acc + toNumberOr(ev.size, 0);
+  }, 0);
+  return {
+    count: len(visible),
+    totalLabel: formatBytes(totalBytes),
+    names: arrayMap(visible, function(ev) { return ev.name; }),
+    at: dateFormat(clock(), "YYYY-MM-DDTHH:mm:ssZ")
+  };
+}

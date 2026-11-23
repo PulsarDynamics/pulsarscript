@@ -102,21 +102,26 @@ func TestCatchReceivesErrorObject(t *testing.T) {
 	if e.kind != kindObject {
 		t.Fatalf("caught value kind = %v, want object", e.kind)
 	}
-	if e.obj["kind"].str != "runtime" || e.obj["message"].str != "division by zero" {
+	if k, _ := e.objectGet("kind"); k.str != "runtime" {
+		t.Errorf("caught value = %s", e.String())
+	} else if m, _ := e.objectGet("message"); m.str != "division by zero" {
 		t.Errorf("caught value = %s", e.String())
 	}
-	if e.obj["line"].kind != kindNumber || e.obj["line"].num != 2 {
-		t.Errorf("line = %s, want 2", e.obj["line"].String())
+	if lv, _ := e.objectGet("line"); lv.kind != kindNumber || lv.num != 2 {
+		t.Errorf("line = %s, want 2", lv.String())
 	}
 }
 
 func TestErrorValueStripsLinePrefix(t *testing.T) {
 	v := errorValue(&RuntimeError{Line: 5, Msg: "boom"}, 0)
-	if v.obj["message"].str != "boom" || v.obj["line"].num != 5 {
+	msgV, _ := v.objectGet("message")
+	lineV, _ := v.objectGet("line")
+	if msgV.str != "boom" || lineV.num != 5 {
 		t.Errorf("got %s", v.String())
 	}
-	if v := errorValue(errString("plain"), 0); v.obj["line"].kind != kindNil {
-		t.Errorf("unknown line should be nil, got %s", v.obj["line"].String())
+	v2 := errorValue(errString("plain"), 0)
+	if lv2, _ := v2.objectGet("line"); lv2.kind != kindNil {
+		t.Errorf("unknown line should be nil, got %s", lv2.String())
 	}
 }
 

@@ -62,10 +62,16 @@ describe("lexer", () => {
     expect(s.literal).toBe("hello world");
   });
 
-  test("strings have no escape sequences in v0", () => {
-    // SPEC v0: a backslash is an ordinary character; escapes arrive in Phase 2.
-    const [s] = tokens('"a\\nb"');
-    expect(s.literal).toBe("a\\nb");
+  test("string escape sequences and unknown-escape errors (LANG-03)", () => {
+    expect(tokens('"a\\nb\\tc\\rd\\\\\\"\\u{1F600}"')[0].literal).toBe("a\nb\tc\rd\\\"\u{1F600}");
+    expect(() => tokens('"bad\\q"')).toThrow(/Unknown escape sequence/);
+  });
+
+  test("tracks token column numbers (LANG-06)", () => {
+    const toks = tokens("var x = 42;\n  print(x);");
+    expect(toks[0].column).toBe(1);  // var
+    expect(toks[1].column).toBe(5);  // x
+    expect(toks[5].column).toBe(3);  // print on line 2
   });
 
   test("line comments are skipped", () => {

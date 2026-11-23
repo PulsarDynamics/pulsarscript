@@ -72,6 +72,10 @@ func TestOpcodeTableMatchesTypeScript(t *testing.T) {
 		"FUNC":          OpFunc,
 		"CALL_VALUE":    OpCallValue,
 		"ITER_ITEMS":    OpIterItems,
+		"CLOSURE":       OpClosure,
+		"GET_UPVALUE":   OpGetUpvalue,
+		"SET_UPVALUE":   OpSetUpvalue,
+		"CLOSE_UPVALUE": OpCloseUpvalue,
 	}
 
 	for name, goVal := range goOpcodes {

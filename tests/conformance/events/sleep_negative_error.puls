@@ -1,0 +1,11 @@
+try {
+  sleep(-5);
+} catch (e) {
+  print(e.kind);
+}
+try {
+  sleep(sqrt(-1));
+} catch (e) {
+  print(e.kind);
+}
+

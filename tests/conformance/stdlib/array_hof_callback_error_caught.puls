@@ -1,0 +1,21 @@
+function blowUp(x) {
+  if (x == 2) return 1 / 0;
+  return x * 10;
+}
+function run() {
+  return arrayMap([1, 2, 3], blowUp);
+}
+try {
+  run();
+} catch (e) {
+  print(e.kind);
+  print(len(e.stack) >= 2);
+  var s = arrayJoin(e.stack, "|");
+  print(indexOf(s, "blowUp") >= 0);
+  print(indexOf(s, "run") >= 0);
+}
+var safe = arrayMap([1, 0, 2], function(x) {
+  try { return 10 / x; } catch (e) { return -1; }
+});
+print(safe);
+

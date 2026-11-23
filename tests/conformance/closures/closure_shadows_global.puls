@@ -1,0 +1,8 @@
+var x = 1;
+function outer() {
+  var x = 99;
+  return function() { return x; };
+}
+var f = outer();
+print(f());
+print(x);

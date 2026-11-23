@@ -1,0 +1,5 @@
+var s = "a\nb\tc\\d\"e";
+print(s);
+print(len("a\rb") == 3);
+print(substr("a\rb", 1, 1) == "\r");
+

@@ -1,0 +1,6 @@
+import { inits } from "./.fixtures/diamond_shared.puls";
+import { leftRead } from "./.fixtures/diamond_left.puls";
+import { rightRead } from "./.fixtures/diamond_right.puls";
+print(inits);
+print(leftRead());
+print(rightRead());

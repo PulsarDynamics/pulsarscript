@@ -1,0 +1,12 @@
+function make() {
+  var n = 10;
+  function inc(d) {
+    n = n + d;
+    return n;
+  }
+  return [inc, function() { return n; }];
+}
+var pair = make();
+print(pair[1]());
+print(pair[0](5));
+print(pair[1]());

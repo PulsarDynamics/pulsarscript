@@ -1,0 +1,5 @@
+try { fromCharCode(0xD800); } catch (e) { print(e.kind); }
+try { fromCharCode(0x110000); } catch (e) { print(e.kind); }
+try { fromCharCode(-1); } catch (e) { print(e.kind); }
+try { fromCharCode(65.5); } catch (e) { print(e.kind); }
+

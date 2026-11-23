@@ -1,0 +1,9 @@
+var items = [
+  {k: 2, tag: "first"},
+  {k: 1, tag: "a"},
+  {k: 2, tag: "second"},
+  {k: 1, tag: "b"}
+];
+var out = arraySort(items, function(x, y) { return x.k - y.k; });
+for (var it of out) print(it.tag);
+

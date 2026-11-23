@@ -1,0 +1,6 @@
+var count = 0;
+registerHandler("tick", function(d) {
+  count = count + d;
+  return count;
+});
+print("registered");

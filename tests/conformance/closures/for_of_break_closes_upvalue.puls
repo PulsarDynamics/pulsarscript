@@ -1,0 +1,6 @@
+var fns = [];
+for (var x of [1, 2, 3]) {
+  fns[len(fns)] = function() { return x; };
+  if (x == 2) break;
+}
+for (var fn of fns) print(fn());

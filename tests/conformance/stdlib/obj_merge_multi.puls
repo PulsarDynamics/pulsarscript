@@ -1,0 +1,6 @@
+var a = {x: 1, y: 2};
+var b = {y: 20, z: 3};
+var c = objMerge(a, b, {z: 30, w: 4});
+print(a);
+print(c);
+

@@ -1,0 +1,3 @@
+function applyTwice(fn, v) { return fn(fn(v)); }
+var k = 3;
+print(applyTwice(function(n) { return n + k; }, 10));

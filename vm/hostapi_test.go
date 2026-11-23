@@ -97,7 +97,7 @@ func TestNewCoreBuiltins(t *testing.T) {
 		{callCore(t, "parseInt", String("19"), Number(8)), "nil"},
 		{callCore(t, "parseInt", String(" -42 "), Number(10)), "-42"},
 		{callCore(t, "parseFloat", String("3.5")), "3.5"},
-		{callCore(t, "parseFloat", String("1e3")), "nil"},
+		{callCore(t, "parseFloat", String("1e3")), "1000"},
 		{callCore(t, "toNumberOr", String(""), Number(5)), "5"},
 		{callCore(t, "isInteger", Number(3)), "true"},
 		{callCore(t, "isFinite", String("1")), "false"},

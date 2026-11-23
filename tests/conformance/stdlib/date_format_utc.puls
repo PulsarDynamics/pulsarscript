@@ -1,0 +1,4 @@
+print(dateFormat(0));
+print(dateFormat(1700000000123, "YYYY-MM-DD HH:mm:ss.SSS"));
+try { dateFormat(sqrt(-1)); } catch (e) { print(e.kind); }
+

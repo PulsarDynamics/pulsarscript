@@ -1,4 +1,0 @@
-// Nested assignment keys must be literals or variables (they are read twice).
-function k() { return 0; }
-var a = [[1]];
-a[k()][0] = 2;
