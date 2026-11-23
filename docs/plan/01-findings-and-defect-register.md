@@ -4,7 +4,7 @@
 
 Every finding, defect and planned fix from the five project docs is listed here once, with its status on 23 November 2026 and the backlog item (Doc 08) and gate (Doc 00) that closes it. The project docs track these in four separate tables with overlapping ID letters; this register is the single list to update from now on.
 
-**Counts on 23 November 2026:** 50 items are open or partly fixed (2 critical, 7 high, 18 medium, 23 low) and 32 are closed (9 audit findings, all 19 language defects, 4 frontend changes). The medium count treats the eight remaining frontend changes (F4, F5, F7–F12) as one item, as the analysis does. The 23 low items include 18 from the audit's unnumbered "low findings" list, which no later doc tracked; they are numbered L6–L23 here.
+**Counts on 23 November 2026:** 49 items are open or partly fixed (1 critical, 7 high, 18 medium, 23 low) and 33 are closed (10 audit findings, all 19 language defects, 4 frontend changes). The medium count treats the eight remaining frontend changes (F4, F5, F7–F12) as one item, as the analysis does. The 23 low items include 18 from the audit's unnumbered "low findings" list, which no later doc tracked; they are numbered L6–L23 here.
 
 ## ID families
 
@@ -26,7 +26,7 @@ Every finding, defect and planned fix from the five project docs is listed here 
 | ID | Finding | Severity | Status | Repo | Closed by | Gate |
 | --- | --- | --- | --- | --- | --- | --- |
 | C1 | Unauthenticated file read | Critical | Fixed | API | — | — |
-| C2 | Any user can make themselves admin through their own properties JSON; the same check gates `.pulsar` publishing in #53 | Critical | Open, reproduced 23 Nov | API | SEC-01, SEC-02 | G0 |
+| C2 | Any user can make themselves admin through their own properties JSON; the same check gates `.pulsar` publishing in #53 | Critical | Fixed 23 Nov: roles live in `user_roles` and `publisher_members` (internal/authz); every admin check, including `POST /v1/appstore/bundles`, asks authz; properties grant nothing; admin granted with `pulsaros-api admin grant <username>` | API | SEC-01, SEC-02 | G0 |
 | C3 | Committed database with a `test`/`test` login is the default; 15 MB binary tracked | Critical | Open | API | SEC-03 | G0 |
 | C4 | Stored XSS through messages | Critical | Fixed | Frontend | — (long-term cookie move: FE-13) | — |
 | C5 | `dev-ecs` frontend does not build | Critical | Fixed | Frontend | — | — |
