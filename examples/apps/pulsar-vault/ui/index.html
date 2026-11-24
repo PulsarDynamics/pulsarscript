@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Pulsar Vault — PulsarScript Notes, Tasks &amp; Snippets</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("pulsar-vault-theme");
+        if (saved === "dark" || saved === "light") {
+          var meta = document.querySelector('meta[name="color-scheme"]');
+          if (meta) meta.setAttribute("content", saved);
+        }
+      } catch (_err) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainWorkspace">Skip to workspace</a>
+
+  <header class="topbar">
+    <div class="brand-group">
+      <img class="brand-logo" src="pulsar-logo.png" alt="PulsarOS logo" width="32" height="32">
+      <div class="brand-text">
+        <h1 class="app-title">Pulsar Vault</h1>
+        <p class="app-subtitle">
+          <span id="hostModeBadge" class="runtime-pill">Mock Host</span>
+          <span id="bundleMetaLine" class="meta-inline">4 modules &bull; CoW &bull; v1.2</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="topbar-metrics" aria-label="Vault summary">
+      <span id="topHealthBadge" class="metric-chip">Health --</span>
+      <span id="topTaskBadge" class="metric-chip">0/0 tasks</span>
+      <span id="topQuotaBadge" class="metric-chip">0 KB</span>
+    </div>
+
+    <div class="topbar-actions">
+      <button id="newNoteBtn" type="button" class="btn btn-primary">+ New Note</button>
+      <button id="simulateSyncBtn" type="button" class="btn btn-secondary" title="Trigger external fs.change event via PulsarScript watcher">Simulate Sync</button>
+      <button id="openExportBtn" type="button" class="btn btn-secondary">Export</button>
+      <button id="openPrefsBtn" type="button" class="btn btn-secondary">Prefs</button>
+      <button id="themeToggleBtn" type="button" class="btn btn-icon" aria-label="Toggle color theme" aria-pressed="false" title="Switch light or dark theme">
+        <span id="themeIcon" aria-hidden="true">&#9790;</span>
+      </button>
+    </div>
+  </header>
+
+  <div id="liveBanner" class="live-banner" role="status" aria-live="polite" hidden>
+    <span id="liveBannerText"></span>
+    <button id="dismissBannerBtn" type="button" class="btn btn-ghost btn-sm" aria-label="Dismiss notification">Dismiss</button>
+  </div>
+
+  <div class="vault-shell">
+    <aside class="sidebar" aria-label="Vault navigation">
+      <search class="search-block">
+        <label class="field-label" for="searchInput">Filter vault notes</label>
+        <input id="searchInput" type="search" placeholder="Search title, body, folder, #tag">
+      </search>
+
+      <div class="kind-pills" role="group" aria-label="Filter by entry kind">
+        <button type="button" class="pill-btn is-active" data-kind="all" aria-pressed="true">All</button>
+        <button type="button" class="pill-btn" data-kind="note" aria-pressed="false">Notes</button>
+        <button type="button" class="pill-btn" data-kind="task" aria-pressed="false">Tasks</button>
+        <button type="button" class="pill-btn" data-kind="snippet" aria-pressed="false">Snippets</button>
+      </div>
+
+      <div class="sort-row">
+        <div class="sort-field">
+          <label class="field-label" for="sortSelect">Sort order</label>
+          <select id="sortSelect">
+            <option value="updated_desc">Recently updated</option>
+            <option value="title_asc">Title (A &rarr; Z)</option>
+            <option value="title_desc">Title (Z &rarr; A)</option>
+            <option value="words_desc">Longest first</option>
+          </select>
+        </div>
+        <button id="pinnedFilterBtn" type="button" class="btn btn-ghost btn-sm" aria-pressed="false">Pinned</button>
+      </div>
+
+      <section class="tag-section" aria-label="Tag index">
+        <div class="section-head">
+          <h2 class="section-title">Tag Index <span id="tagTotalLabel" class="muted-count">0</span></h2>
+          <button id="clearTagBtn" type="button" class="btn btn-link" hidden>Clear tag</button>
+        </div>
+        <div id="tagCloud" class="tag-cloud" role="list"></div>
+      </section>
+
+      <section class="notes-section" aria-label="Vault notes list">
+        <div class="section-head">
+          <h2 class="section-title">Entries <span id="notesCountLabel" class="muted-count">0</span></h2>
+        </div>
+        <ul id="noteList" class="note-list"></ul>
+        <p id="noteListEmpty" class="empty-hint" hidden>No entries match the active filters.</p>
+      </section>
+    </aside>
+
+    <main id="mainWorkspace" class="workspace" tabindex="-1">
+      <div class="workspace-bar">
+        <div class="tab-strip" role="tablist" aria-label="Workspace view">
+          <button id="tabEditor" type="button" role="tab" aria-selected="true" aria-controls="panelEditor" class="tab-btn is-active">Editor &amp; Tasks</button>
+          <button id="tabPreview" type="button" role="tab" aria-selected="false" aria-controls="panelPreview" class="tab-btn">Preview</button>
+          <button id="tabTelemetry" type="button" role="tab" aria-selected="false" aria-controls="panelTelemetry" class="tab-btn">
+            Sandbox &amp; Telemetry
+            <span id="corruptBadge" class="alert-pill" hidden>0</span>
+          </button>
+        </div>
+        <div class="rpc-meta" aria-label="Last script execution telemetry">
+          <span id="lastRpcBadge" class="mono-meta">Ready</span>
+        </div>
+      </div>
+
+      <section id="panelEditor" role="tabpanel" aria-labelledby="tabEditor" class="panel-card">
+        <form id="noteForm" class="note-form" novalidate>
+          <div class="form-grid-top">
+            <div class="field-group field-span-2">
+              <label class="field-label" for="noteTitleInput">Note title</label>
+              <input id="noteTitleInput" type="text" required placeholder="Untitled Vault Entry">
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="noteKindSelect">Entry kind</label>
+              <select id="noteKindSelect">
+                <option value="note">Note</option>
+                <option value="task">Task Checklist</option>
+                <option value="snippet">Code Snippet</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="noteFolderInput">Folder</label>
+              <input id="noteFolderInput" type="text" list="folderDatalist" placeholder="inbox">
+              <datalist id="folderDatalist"></datalist>
+            </div>
+          </div>
+
+          <div class="form-grid-mid">
+            <div class="field-group field-span-2">
+              <label class="field-label" for="noteTagsInput">Tags (comma separated or inline #tags)</label>
+              <input id="noteTagsInput" type="text" placeholder="pulsarscript, architecture, qa">
+            </div>
+
+            <div class="checkbox-row">
+              <input id="notePinnedCheck" type="checkbox">
+              <label for="notePinnedCheck">Pin to top of vault</label>
+            </div>
+          </div>
+
+          <div class="editor-split">
+            <div class="field-group editor-body-col">
+              <label class="field-label" for="noteBodyInput">Markdown body &amp; tasks (use <code>- [ ]</code> for tasks)</label>
+              <textarea id="noteBodyInput" rows="13" placeholder="Write Markdown notes, code snippets, or - [ ] tasks..."></textarea>
+            </div>
+
+            <aside class="tasks-pane" aria-label="Interactive checklist">
+              <div class="section-head">
+                <h2 class="section-title">Markdown Tasks</h2>
+                <span id="taskPaneSummary" class="muted-count">0 open</span>
+              </div>
+              <ul id="taskChecklist" class="task-list"></ul>
+              <p id="taskChecklistEmpty" class="empty-hint">Add lines starting with <code>- [ ] Task item</code> to create interactive PulsarScript tasks.</p>
+            </aside>
+          </div>
+
+          <div class="editor-actions">
+            <div class="editor-info-meta">
+              <span id="activeIdBadge" class="mono-meta">Draft (unsaved)</span>
+              <span id="snapshotStatusBadge" class="mono-meta"></span>
+            </div>
+            <div class="editor-btn-row">
+              <button id="deleteNoteBtn" type="button" class="btn btn-danger" hidden>Delete Note</button>
+              <button id="saveNoteBtn" type="submit" class="btn btn-primary">Save Note</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section id="panelPreview" role="tabpanel" aria-labelledby="tabPreview" class="panel-card" hidden>
+        <article id="previewArticle" class="preview-article"></article>
+      </section>
+
+      <section id="panelTelemetry" role="tabpanel" aria-labelledby="tabTelemetry" class="panel-card telemetry-grid" hidden>
+        <div class="subcard">
+          <div class="section-head">
+            <h2 class="section-title">Corrupt JSON Quarantine (try/catch + Multi-file Stack)</h2>
+            <div class="inline-actions">
+              <button id="injectCorruptBtn" type="button" class="btn btn-secondary btn-sm">Simulate Corrupt File</button>
+              <button id="clearCorruptBtn" type="button" class="btn btn-ghost btn-sm" hidden>Clear Corrupt</button>
+            </div>
+          </div>
+          <p class="hint-text">Writes malformed JSON into <code>notes/_corrupt_sample.json</code>. PulsarScript catches the parse error cleanly and isolates stack frames without crashing valid notes.</p>
+          <ul id="corruptList" class="corrupt-list"></ul>
+          <p id="corruptEmpty" class="empty-hint">No quarantined files detected. All vault JSON records parsed cleanly.</p>
+        </div>
+
+        <div class="subcard">
+          <h2 class="section-title">Health, Quota &amp; Trigonometry Telemetry</h2>
+          <div id="statsCards" class="stat-cards"></div>
+          <div class="quota-block">
+            <div class="quota-labels">
+              <label for="quotaProgress">Sandbox FS Quota Usage</label>
+              <span id="quotaText" class="mono-meta">0 / 1024 KB</span>
+            </div>
+            <progress id="quotaProgress" max="100" value="0">0%</progress>
+          </div>
+        </div>
+
+        <div class="subcard">
+          <h2 class="section-title">Compiled Bundle &amp; Virtual Storage</h2>
+          <div id="bundleSummaryGrid" class="kv-grid"></div>
+          <h3 class="sub-heading">Sandbox Files (JSON, .b64 snapshots, index, exports)</h3>
+          <ul id="sandboxFilesList" class="mono-list"></ul>
+        </div>
+
+        <div class="subcard">
+          <h2 class="section-title">Live Watch Events (on("fs.change") &rarr; emit + notifyWindow)</h2>
+          <ul id="eventStreamList" class="mono-list"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Cursor-Paged Export Modal -->
+  <dialog id="exportDialog" class="vault-dialog" aria-labelledby="exportDialogTitle">
+    <div class="dialog-header">
+      <h2 id="exportDialogTitle" class="dialog-title">Cursor-Paged Export Digest</h2>
+      <button type="button" class="btn btn-icon btn-sm" data-close-dialog aria-label="Close export dialog">&times;</button>
+    </div>
+    <div class="dialog-body">
+      <div class="export-controls">
+        <div class="field-group">
+          <label class="field-label" for="exportFormatSelect">Format</label>
+          <select id="exportFormatSelect">
+            <option value="markdown">Markdown Digest (.md)</option>
+            <option value="json">JSON Archive (.json)</option>
+            <option value="base64">UTF-8 Base64 Backup (.b64)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="exportPageSizeInput">Notes per page</label>
+          <input id="exportPageSizeInput" type="number" min="1" max="12" value="3">
+        </div>
+        <button id="refreshExportBtn" type="button" class="btn btn-secondary">Render Page</button>
+      </div>
+
+      <div class="export-meta-row">
+        <span id="exportMetaText" class="mono-meta">Page 1 of 1</span>
+        <span id="exportPathText" class="mono-meta"></span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="exportOutputText">Exported page content</label>
+        <textarea id="exportOutputText" rows="11" readonly></textarea>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <div class="pager-controls">
+        <button id="exportFirstBtn" type="button" class="btn btn-ghost btn-sm">Page 1</button>
+        <button id="exportNextBtn" type="button" class="btn btn-secondary btn-sm">Next Page &rarr;</button>
+      </div>
+      <div class="dialog-end-actions">
+        <div class="copy-wrap">
+          <button id="copyExportBtn" type="button" class="btn btn-secondary">Copy Output</button>
+          <span id="copyExportTip" class="copy-tip" role="status" aria-live="polite">Copied!</span>
+        </div>
+        <button type="button" class="btn btn-primary" data-close-dialog>Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- KV Preferences Modal -->
+  <dialog id="prefsDialog" class="vault-dialog vault-dialog-sm" aria-labelledby="prefsDialogTitle">
+    <form id="prefsForm" method="dialog">
+      <div class="dialog-header">
+        <h2 id="prefsDialogTitle" class="dialog-title">Vault Preferences (kvSet / objMerge / objDelete)</h2>
+        <button type="button" class="btn btn-icon btn-sm" data-close-dialog aria-label="Close preferences dialog">&times;</button>
+      </div>
+      <div class="dialog-body form-stack">
+        <div class="field-group">
+          <label class="field-label" for="prefDefaultKindSelect">Default entry kind for new notes</label>
+          <select id="prefDefaultKindSelect">
+            <option value="note">Note</option>
+            <option value="task">Task Checklist</option>
+            <option value="snippet">Code Snippet</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="prefSortSelect">Default sort order</label>
+          <select id="prefSortSelect">
+            <option value="updated_desc">Recently updated</option>
+            <option value="title_asc">Title (A &rarr; Z)</option>
+            <option value="title_desc">Title (Z &rarr; A)</option>
+            <option value="words_desc">Longest first</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="prefPageSizeInput">Default export page size</label>
+          <input id="prefPageSizeInput" type="number" min="1" max="12" value="4">
+        </div>
+        <div class="checkbox-row">
+          <input id="prefAutoSnapshotCheck" type="checkbox" checked>
+          <label for="prefAutoSnapshotCheck">Write Base64 binary snapshot on every save</label>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button id="prefsResetBtn" type="submit" value="reset" class="btn btn-ghost">Reset KV Defaults</button>
+        <div class="dialog-end-actions">
+          <button type="button" class="btn btn-secondary" data-close-dialog>Cancel</button>
+          <button type="submit" value="save" class="btn btn-primary">Save Preferences</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Delete Confirmation Modal (autofocus Cancel per dialog guidance) -->
+  <dialog id="deleteDialog" class="vault-dialog vault-dialog-xs" aria-labelledby="deleteDialogTitle">
+    <form method="dialog">
+      <div class="dialog-header">
+        <h2 id="deleteDialogTitle" class="dialog-title">Delete Vault Entry?</h2>
+      </div>
+      <div class="dialog-body">
+        <p id="deleteDialogMessage">This removes the note JSON file, deletes its Base64 snapshot, and prunes empty buckets from the CoW tag index.</p>
+      </div>
+      <div class="dialog-footer dialog-footer-end">
+        <button id="deleteCancelBtn" type="submit" value="cancel" class="btn btn-secondary" autofocus>Cancel</button>
+        <button id="deleteConfirmBtn" type="submit" value="confirm" class="btn btn-danger">Delete Entry</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

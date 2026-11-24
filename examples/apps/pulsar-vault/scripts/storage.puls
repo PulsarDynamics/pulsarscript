@@ -1,0 +1,398 @@
+// storage.puls — Atomic FS persistence, KV preferences, closure ID generator, Base64 snapshots, and try/catch recovery.
+
+import {
+  asArray,
+  asObject,
+  encodeUtf8Base64,
+  extractInlineTags,
+  getProp,
+  normalizeNewlines,
+  slugify,
+  VAULT_LOCK_ICON,
+  VAULT_SPARK_ICON
+} from "./format.puls";
+
+export const NOTES_DIR = "notes";
+export const SNAPSHOTS_DIR = "snapshots";
+export const EXPORTS_DIR = "exports";
+export const INDEX_FILE = "index.json";
+export const PREFS_KEY = "pulsar_vault_prefs";
+export const SEEDED_KEY = "pulsar_vault_seeded";
+
+export const DEFAULT_PREFS = {
+  defaultKind: "note",
+  sortBy: "updated_desc",
+  autoSnapshot: true,
+  pageSize: 4,
+  compactDensity: false
+};
+
+randomSeed(clock() % 100000);
+
+export function makeIdGenerator(prefix) {
+  var cleanPrefix = slugify(prefix);
+  var seq = 0;
+
+  return function(titleHint) {
+    seq += 1;
+    var salt = randomInt(0x100, 0xfff);
+    var hint = slugify(titleHint == nil ? "" : string(titleHint));
+    var shortHint = len(hint) > 16 ? substr(hint, 0, 16) : hint;
+    var ts = clock();
+    var paddedSeq = padStart(string(seq), 3, "0");
+    var paddedSalt = padStart(string(salt), 4, "0");
+    return `${cleanPrefix}-${shortHint}-${ts}-${paddedSeq}-${paddedSalt}`;
+  };
+}
+
+export function isDirEntry(entry) {
+  if (typeOf(entry) != "object") {
+    return false;
+  }
+  var d = objGet(entry, "dir");
+  if (d == nil) {
+    d = objGet(entry, "isDir");
+  }
+  return d == true;
+}
+
+export function ensureVaultDirs() {
+  var dirs = [NOTES_DIR, SNAPSHOTS_DIR, EXPORTS_DIR];
+  for (var i = 0; i < arrayLen(dirs); i += 1) {
+    var dir = dirs[i];
+    if (!fsExists(dir)) {
+      fsMkdir(dir);
+    }
+  }
+}
+
+export function getPrefs() {
+  var stored = kvGet(PREFS_KEY);
+  var storedObj = {};
+
+  if (typeOf(stored) == "object") {
+    storedObj = stored;
+  } else if (typeOf(stored) == "string" && len(trim(stored)) > 0) {
+    try {
+      var decoded = jsonParse(stored);
+      if (typeOf(decoded) == "object") {
+        storedObj = decoded;
+      }
+    } catch (_e) {
+      storedObj = {};
+    }
+  }
+  return objMerge(DEFAULT_PREFS, storedObj);
+}
+
+export function savePrefs(patch) {
+  var input = asObject(patch);
+  if (getProp(input, "reset", false) == true) {
+    kvDelete(PREFS_KEY);
+    return DEFAULT_PREFS;
+  }
+
+  var current = getPrefs();
+  var cleanPatch = objDelete(input, "reset");
+  cleanPatch = objDelete(cleanPatch, "clearKeys");
+
+  var merged = objMerge(current, cleanPatch);
+  var clearKeys = asArray(getProp(input, "clearKeys", []));
+  for (var i = 0; i < arrayLen(clearKeys); i += 1) {
+    var k = string(clearKeys[i]);
+    if (objHas(DEFAULT_PREFS, k)) {
+      merged = objSet(merged, k, objGet(DEFAULT_PREFS, k));
+    } else {
+      merged = objDelete(merged, k);
+    }
+  }
+
+  var entries = objEntries(merged);
+  for (var j = 0; j < arrayLen(entries); j += 1) {
+    var key = entries[j][0];
+    var val = entries[j][1];
+    if (val == nil) {
+      merged = objDelete(merged, key);
+    }
+  }
+
+  kvSet(PREFS_KEY, merged);
+  return merged;
+}
+
+function normalizeTagList(rawTags, body) {
+  var seen = [];
+  var input = asArray(rawTags);
+  for (var i = 0; i < arrayLen(input); i += 1) {
+    var t = toLower(trim(string(input[i])));
+    if (startsWith(t, "#")) {
+      t = substr(t, 1, len(t) - 1);
+    }
+    if (len(t) > 0 && !arrayIncludes(seen, t)) {
+      seen[arrayLen(seen)] = t;
+    }
+  }
+  var inline = extractInlineTags(body);
+  for (var j = 0; j < arrayLen(inline); j += 1) {
+    if (!arrayIncludes(seen, inline[j])) {
+      seen[arrayLen(seen)] = inline[j];
+    }
+  }
+  return arraySort(seen);
+}
+
+export function normalizeNoteInput(rawNote, existingNote, nextIdFn) {
+  var input = asObject(rawNote);
+  var prev = asObject(existingNote);
+  var now = clock();
+
+  var rawId = trim(string(getProp(input, "id", "")));
+  var prevId = trim(string(getProp(prev, "id", "")));
+  var title = trim(string(getProp(input, "title", getProp(prev, "title", "Untitled Note"))));
+  if (len(title) == 0) {
+    title = "Untitled Note";
+  }
+
+  var id = len(rawId) > 0 ? slugify(rawId) : (len(prevId) > 0 ? prevId : nextIdFn(title));
+  var kind = toLower(trim(string(getProp(input, "kind", getProp(prev, "kind", "note")))));
+  if (kind != "note" && kind != "task" && kind != "snippet") {
+    kind = "note";
+  }
+  var folder = toLower(trim(string(getProp(input, "folder", getProp(prev, "folder", "inbox")))));
+  if (len(folder) == 0) {
+    folder = "inbox";
+  }
+
+  var body = normalizeNewlines(getProp(input, "body", getProp(prev, "body", "")));
+  var tags = normalizeTagList(getProp(input, "tags", getProp(prev, "tags", [])), body);
+  var pinned = getProp(input, "pinned", getProp(prev, "pinned", false)) == true;
+  var createdAt = number(getProp(prev, "createdAt", getProp(input, "createdAt", now)));
+  if (createdAt == nil) {
+    createdAt = now;
+  }
+  var revision = toNumberOr(getProp(prev, "revision", 0), 0) + 1;
+
+  return {
+    id: id,
+    title: title,
+    kind: kind,
+    folder: folder,
+    tags: tags,
+    body: body,
+    pinned: pinned,
+    createdAt: createdAt,
+    updatedAt: now,
+    revision: revision
+  };
+}
+
+export function noteFilePath(noteId) {
+  return `${NOTES_DIR}/${noteId}.json`;
+}
+
+export function snapshotFilePath(noteId) {
+  return `${SNAPSHOTS_DIR}/${noteId}.b64`;
+}
+
+function parseNoteJsonStrict(rawText, filePath) {
+  var parsed = jsonParse(rawText);
+  if (typeOf(parsed) != "object" || !objHas(parsed, "title") || typeOf(parsed.title) != "string") {
+    var forceErr = 1 / 0;
+    return forceErr;
+  }
+  if (!objHas(parsed, "id") || len(trim(string(parsed.id))) == 0) {
+    var base = replace(filePath, NOTES_DIR + "/", "");
+    parsed = objSet(parsed, "id", replace(base, ".json", ""));
+  }
+  return parsed;
+}
+
+export function loadNoteById(noteId) {
+  var path = noteFilePath(noteId);
+  var raw = fsRead(path);
+  if (raw == nil) {
+    return nil;
+  }
+  return parseNoteJsonStrict(raw, path);
+}
+
+export function loadAllNotes() {
+  ensureVaultDirs();
+  var entries = asArray(fsList(NOTES_DIR));
+  var notes = [];
+  var corrupt = [];
+
+  for (var i = 0; i < arrayLen(entries); i += 1) {
+    var entry = entries[i];
+    if (isDirEntry(entry)) {
+      continue;
+    }
+    var name = string(getProp(entry, "name", ""));
+    if (!endsWith(name, ".json")) {
+      continue;
+    }
+    var filePath = `${NOTES_DIR}/${name}`;
+    try {
+      var raw = fsRead(filePath);
+      if (raw == nil) {
+        continue;
+      }
+      var parsed = parseNoteJsonStrict(raw, filePath);
+      notes[arrayLen(notes)] = parsed;
+    } catch (err) {
+      corrupt[arrayLen(corrupt)] = {
+        file: filePath,
+        kind: getProp(err, "kind", "runtime"),
+        line: getProp(err, "line", nil),
+        message: string(getProp(err, "message", "Malformed note JSON")),
+        stack: asArray(getProp(err, "stack", []))
+      };
+    }
+  }
+
+  return {
+    notes: notes,
+    corrupt: corrupt
+  };
+}
+
+export function writeNoteAtomic(note, writeSnapshot) {
+  ensureVaultDirs();
+  var finalPath = noteFilePath(note.id);
+  var tmpPath = `${NOTES_DIR}/.${note.id}.tmp`;
+  var jsonText = jsonStringify(note);
+
+  fsWrite(tmpPath, jsonText);
+  if (fsExists(finalPath)) {
+    fsDelete(finalPath);
+  }
+  fsRename(tmpPath, finalPath);
+
+  var snapshotPath = snapshotFilePath(note.id);
+  var snapshotSize = 0;
+  if (writeSnapshot) {
+    var b64 = encodeUtf8Base64(jsonText);
+    fsWriteBase64(snapshotPath, b64);
+    fsCopy(finalPath, `${SNAPSHOTS_DIR}/latest.json`);
+    var st = fsStat(snapshotPath);
+    snapshotSize = st != nil ? toNumberOr(getProp(st, "size", len(b64)), len(b64)) : 0;
+  }
+
+  return {
+    path: finalPath,
+    snapshotPath: writeSnapshot ? snapshotPath : nil,
+    snapshotSize: snapshotSize
+  };
+}
+
+export function removeNoteFiles(noteId) {
+  var removed = false;
+  var paths = [noteFilePath(noteId), snapshotFilePath(noteId)];
+  for (var i = 0; i < arrayLen(paths); i += 1) {
+    if (fsExists(paths[i])) {
+      fsDelete(paths[i]);
+      removed = true;
+    }
+  }
+  return removed;
+}
+
+export function writeTagIndexFile(tagPayload) {
+  ensureVaultDirs();
+  fsWrite(INDEX_FILE, jsonStringify(tagPayload));
+}
+
+export function seedStarterVaultIfNeeded(nextIdFn) {
+  ensureVaultDirs();
+  var alreadySeeded = kvGet(SEEDED_KEY) == true;
+  var existing = asArray(fsList(NOTES_DIR));
+  var hasJson = false;
+  for (var i = 0; i < arrayLen(existing); i += 1) {
+    if (!isDirEntry(existing[i]) && endsWith(string(getProp(existing[i], "name", "")), ".json")) {
+      hasJson = true;
+      break;
+    }
+  }
+  if (alreadySeeded || hasJson) {
+    return false;
+  }
+
+  var now = clock();
+  var starters = [
+    {
+      id: "welcome-pulsar-vault",
+      title: `Welcome to Pulsar Vault ${VAULT_LOCK_ICON}`,
+      kind: "note",
+      folder: "architecture",
+      pinned: true,
+      tags: ["pulsarscript", "architecture", "v1-2"],
+      createdAt: now - 360000,
+      updatedAt: now - 120000,
+      body: `# Pulsar Vault ${VAULT_SPARK_ICON}\n\nPulsar Vault stores every note, checklist, and code snippet inside sandboxed PulsarOS storage (\`notes/*.json\`) backed by an inverted Copy-on-Write tag index and Base64 binary snapshots.\n\n- [x] Compile multi-file \`import\`/\`export\` PulsarScript modules\n- [x] Persist preferences in \`kvSet\` with \`objMerge\` and \`objDelete\`\n- [ ] Trigger a live \`fs.change\` sync from the toolbar\n\nExplore #cow-values and #sandbox in the sidebar.`
+    },
+    {
+      id: "release-checklist",
+      title: "App Store Release Checklist",
+      kind: "task",
+      folder: "release",
+      pinned: true,
+      tags: ["release", "qa", "checklist"],
+      createdAt: now - 280000,
+      updatedAt: now - 60000,
+      body: "Verification checklist inside RPC (`1.5s` / `250k` steps) and Service budgets:\n\n- [x] Validate `AppManifest.json` permissions (`fs.read`, `fs.write`, `kv`, `events`)\n- [ ] Run cursor-paginated Markdown digest export\n- [ ] Test corrupt JSON `try/catch` stack quarantine\n- [ ] Verify 375px mobile drawer reflow and dark/light theme sync"
+    },
+    {
+      id: "cow-closures-snippet",
+      title: "CoW Tag Index & Closure Filter Snippet",
+      kind: "snippet",
+      folder: "snippets",
+      pinned: false,
+      tags: ["closures", "cow", "snippets"],
+      createdAt: now - 200000,
+      updatedAt: now - 40000,
+      body: "```pulsar\n// Lexical closure + D15 Copy-on-Write bucket update\nfunction makeCounter(prefix) {\n  var seq = 0;\n  return function(tag) {\n    seq += 1;\n    return `${prefix}:${tag}#${seq}`;\n  };\n}\n```\n\nString ordering (`<` / `>`) sorts note titles cleanly on both TS `Interpreter` and Go VM (#utf8)."
+    },
+    {
+      id: "budget-telemetry-notes",
+      title: "VM Budget & Telemetry Notes",
+      kind: "note",
+      folder: "telemetry",
+      pinned: false,
+      tags: ["vm", "telemetry", "budget"],
+      createdAt: now - 150000,
+      updatedAt: now - 15000,
+      body: "PulsarScript telemetry computes vault health from `log10`, `exp`, `clamp`, `round`, `sin`, `cos`, `atan2`, and `fsQuota()`.\n\n- [x] Atomic writes via `fsWrite` + `fsRename`\n- [x] UTF-8 Base64 snapshot via `fsWriteBase64`\n\n#observability #rpc"
+    }
+  ];
+
+  for (var j = 0; j < arrayLen(starters); j += 1) {
+    var normalized = normalizeNoteInput(starters[j], nil, nextIdFn);
+    normalized.createdAt = starters[j].createdAt;
+    normalized.updatedAt = starters[j].updatedAt;
+    writeNoteAtomic(normalized, true);
+  }
+  kvSet(SEEDED_KEY, true);
+  return true;
+}
+
+export function injectCorruptSampleFile() {
+  ensureVaultDirs();
+  var corruptPath = `${NOTES_DIR}/_corrupt_sample.json`;
+  fsWrite(corruptPath, "{\"id\":\"_corrupt_sample\",\"title\":");
+  return corruptPath;
+}
+
+export function clearCorruptSampleFiles() {
+  ensureVaultDirs();
+  var entries = asArray(fsList(NOTES_DIR));
+  var removed = [];
+  for (var i = 0; i < arrayLen(entries); i += 1) {
+    var name = string(getProp(entries[i], "name", ""));
+    if (!isDirEntry(entries[i]) && startsWith(name, "_corrupt_") && endsWith(name, ".json")) {
+      var fullPath = `${NOTES_DIR}/${name}`;
+      fsDelete(fullPath);
+      removed[arrayLen(removed)] = fullPath;
+    }
+  }
+  return removed;
+}

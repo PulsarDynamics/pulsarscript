@@ -1,0 +1,285 @@
+// index.puls — CoW tag indexing, closure matchers & comparators, string ordering, and vault telemetry math.
+
+import {
+  asArray,
+  countWords,
+  formatShortDate,
+  getProp,
+  parseTasks,
+  readingMinutes,
+  stripMarkdownLine
+} from "./format.puls";
+
+export function summarizeNote(note) {
+  var title = string(getProp(note, "title", "Untitled"));
+  var body = string(getProp(note, "body", ""));
+  var tasks = parseTasks(body);
+  var doneTasks = 0;
+  var openTasks = 0;
+
+  for (var i = 0; i < arrayLen(tasks); i += 1) {
+    if (tasks[i].done) {
+      doneTasks += 1;
+    } else {
+      openTasks += 1;
+    }
+  }
+
+  var words = countWords(body);
+  var updatedAt = number(getProp(note, "updatedAt", 0));
+  if (updatedAt == nil) {
+    updatedAt = 0;
+  }
+
+  return {
+    id: string(getProp(note, "id", "")),
+    title: title,
+    kind: string(getProp(note, "kind", "note")),
+    folder: string(getProp(note, "folder", "inbox")),
+    tags: asArray(getProp(note, "tags", [])),
+    pinned: getProp(note, "pinned", false) == true,
+    updatedAt: updatedAt,
+    updatedLabel: formatShortDate(updatedAt),
+    wordCount: words,
+    readingMinutes: readingMinutes(words),
+    openTasks: openTasks,
+    doneTasks: doneTasks,
+    taskCount: openTasks + doneTasks,
+    preview: stripMarkdownLine(body),
+    revision: getProp(note, "revision", 1)
+  };
+}
+
+export function buildTagIndex(notes) {
+  var tagMap = {};
+
+  for (var i = 0; i < arrayLen(notes); i += 1) {
+    var note = notes[i];
+    var id = string(getProp(note, "id", ""));
+    var tags = asArray(getProp(note, "tags", []));
+    for (var j = 0; j < arrayLen(tags); j += 1) {
+      var tag = toLower(trim(string(tags[j])));
+      if (len(tag) == 0) {
+        continue;
+      }
+      var bucket = objHas(tagMap, tag) ? tagMap[tag] : [];
+      if (!arrayIncludes(bucket, id)) {
+        bucket[arrayLen(bucket)] = id;
+        tagMap[tag] = bucket;
+      }
+    }
+  }
+
+  var sortedTags = arraySort(objKeys(tagMap));
+  var counts = {};
+  for (var k = 0; k < arrayLen(sortedTags); k += 1) {
+    var name = sortedTags[k];
+    var ids = arraySort(tagMap[name]);
+    if (arrayLen(ids) == 0) {
+      tagMap = objDelete(tagMap, name);
+    } else {
+      tagMap[name] = ids;
+      counts[name] = arrayLen(ids);
+    }
+  }
+
+  return {
+    index: tagMap,
+    counts: counts,
+    sortedTags: objKeys(tagMap)
+  };
+}
+
+export function pruneNoteFromTagIndex(tagIndex, noteId) {
+  var nextIndex = tagIndex;
+  var entries = objEntries(nextIndex);
+
+  for (var i = 0; i < arrayLen(entries); i += 1) {
+    var tag = entries[i][0];
+    var filtered = arrayFilter(asArray(entries[i][1]), function(id) {
+      return id != noteId;
+    });
+    if (arrayLen(filtered) == 0) {
+      nextIndex = objDelete(nextIndex, tag);
+    } else {
+      nextIndex = objSet(nextIndex, tag, filtered);
+    }
+  }
+  return nextIndex;
+}
+
+export function makeNoteMatcher(filterOpts) {
+  var query = toLower(trim(string(getProp(filterOpts, "q", ""))));
+  var tagFilter = toLower(trim(string(getProp(filterOpts, "tag", ""))));
+  var kindFilter = toLower(trim(string(getProp(filterOpts, "kind", ""))));
+  var folderFilter = toLower(trim(string(getProp(filterOpts, "folder", ""))));
+  var pinnedOnly = getProp(filterOpts, "pinnedOnly", false) == true;
+
+  return function(summary) {
+    if (pinnedOnly && !getProp(summary, "pinned", false)) {
+      return false;
+    }
+    if (len(kindFilter) > 0 && kindFilter != "all" && toLower(getProp(summary, "kind", "")) != kindFilter) {
+      return false;
+    }
+    if (len(folderFilter) > 0 && folderFilter != "all" && toLower(getProp(summary, "folder", "")) != folderFilter) {
+      return false;
+    }
+    if (len(tagFilter) > 0 && !arrayIncludes(asArray(getProp(summary, "tags", [])), tagFilter)) {
+      return false;
+    }
+    if (len(query) > 0) {
+      var haystack = toLower(concat(
+        getProp(summary, "title", ""),
+        " ",
+        getProp(summary, "preview", ""),
+        " ",
+        getProp(summary, "folder", ""),
+        " ",
+        arrayJoin(asArray(getProp(summary, "tags", [])), " ")
+      ));
+      if (indexOf(haystack, query, 0) < 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+}
+
+export function makeNoteComparator(sortBy) {
+  var mode = string(sortBy == nil ? "updated_desc" : sortBy);
+
+  return function(a, b) {
+    var aPinned = getProp(a, "pinned", false) == true;
+    var bPinned = getProp(b, "pinned", false) == true;
+    if (aPinned != bPinned) {
+      return aPinned ? -1 : 1;
+    }
+
+    var aTitle = toLower(string(getProp(a, "title", "")));
+    var bTitle = toLower(string(getProp(b, "title", "")));
+
+    if (mode == "title_asc") {
+      if (aTitle < bTitle) {
+        return -1;
+      }
+      if (aTitle > bTitle) {
+        return 1;
+      }
+      return getProp(a, "id", "") < getProp(b, "id", "") ? -1 : 1;
+    }
+
+    if (mode == "title_desc") {
+      if (aTitle > bTitle) {
+        return -1;
+      }
+      if (aTitle < bTitle) {
+        return 1;
+      }
+      return getProp(a, "id", "") < getProp(b, "id", "") ? -1 : 1;
+    }
+
+    if (mode == "words_desc") {
+      var dw = getProp(b, "wordCount", 0) - getProp(a, "wordCount", 0);
+      if (dw != 0) {
+        return dw;
+      }
+      return aTitle < bTitle ? -1 : (aTitle > bTitle ? 1 : 0);
+    }
+
+    var dt = getProp(b, "updatedAt", 0) - getProp(a, "updatedAt", 0);
+    if (dt != 0) {
+      return dt;
+    }
+    if (aTitle < bTitle) {
+      return -1;
+    }
+    if (aTitle > bTitle) {
+      return 1;
+    }
+    return 0;
+  };
+}
+
+export function computeVaultStats(summaries, corruptCount, quotaInfo) {
+  var initial = {
+    totalNotes: 0,
+    totalWords: 0,
+    openTasks: 0,
+    doneTasks: 0,
+    pinnedCount: 0,
+    noteKind: 0,
+    taskKind: 0,
+    snippetKind: 0
+  };
+
+  var agg = arrayReduce(summaries, function(acc, item) {
+    var next = acc;
+    next.totalNotes += 1;
+    next.totalWords += getProp(item, "wordCount", 0);
+    next.openTasks += getProp(item, "openTasks", 0);
+    next.doneTasks += getProp(item, "doneTasks", 0);
+    if (getProp(item, "pinned", false) == true) {
+      next.pinnedCount += 1;
+    }
+    var kind = getProp(item, "kind", "note");
+    if (kind == "task") {
+      next.taskKind += 1;
+    } else if (kind == "snippet") {
+      next.snippetKind += 1;
+    } else {
+      next.noteKind += 1;
+    }
+    return next;
+  }, initial);
+
+  var totalTasks = agg.openTasks + agg.doneTasks;
+  var completionRatio = totalTasks > 0 ? agg.doneTasks / totalTasks : 1;
+  var completionPct = round(clamp(completionRatio * 100, 0, 100));
+
+  var depthFactor = clamp(log10(max(1, agg.totalWords + 1)) * 22, 0, 50);
+  var taskBonus = clamp(completionRatio * 50, 0, 50);
+  var decayPenalty = corruptCount > 0 ? round((1 - exp(-corruptCount * 0.45)) * 35) : 0;
+  var healthScore = round(clamp(depthFactor + taskBonus - decayPenalty, 0, 100));
+
+  var theta = clamp(completionRatio, 0, 1) * mathPi() / 2;
+  var arcSin = round(sin(theta) * 1000) / 1000;
+  var arcCos = round(cos(theta) * 1000) / 1000;
+  var arcTan = round(tan(clamp(theta * 0.85, 0, 1.2)) * 1000) / 1000;
+  var balanceAngle = round(atan2(agg.doneTasks + 1, max(1, agg.openTasks + 1)) * 1000) / 1000;
+  var rmsDensity = round(sqrt(pow(max(0, agg.totalWords), 2) / max(1, agg.totalNotes)) * 10) / 10;
+  var naturalScale = round(log(max(mathE(), agg.totalWords + mathE())) * 100) / 100;
+
+  var usedBytes = abs(number(getProp(quotaInfo, "used", 0)) == nil ? 0 : number(getProp(quotaInfo, "used", 0)));
+  var maxBytes = max(1, number(getProp(quotaInfo, "max", 1048576)) == nil ? 1048576 : number(getProp(quotaInfo, "max", 1048576)));
+  var quotaPct = round(clamp(usedBytes * 100 / maxBytes, 0, 100) * 10) / 10;
+
+  return {
+    totalNotes: agg.totalNotes,
+    totalWords: agg.totalWords,
+    openTasks: agg.openTasks,
+    doneTasks: agg.doneTasks,
+    totalTasks: totalTasks,
+    pinnedCount: agg.pinnedCount,
+    kinds: {
+      note: agg.noteKind,
+      task: agg.taskKind,
+      snippet: agg.snippetKind
+    },
+    completionPct: completionPct,
+    healthScore: healthScore,
+    corruptCount: corruptCount,
+    rmsWordSpread: rmsDensity,
+    entropyScale: naturalScale,
+    quotaUsedBytes: usedBytes,
+    quotaMaxBytes: maxBytes,
+    quotaPct: quotaPct,
+    telemetry: {
+      arcSin: arcSin,
+      arcCos: arcCos,
+      arcTan: arcTan,
+      balanceAngle: balanceAngle,
+      decayPenalty: decayPenalty
+    }
+  };
+}
