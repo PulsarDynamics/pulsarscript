@@ -1,0 +1,58 @@
+{
+  "name": "pulsarscript",
+  "displayName": "PulsarScript",
+  "description": "Language support (LSP diagnostics, completions, hover, cross-file definitions, formatting) and AppManifest.json schema validation for PulsarScript.",
+  "version": "1.2.0",
+  "publisher": "PulsarDynamics",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Linters", "Formatters"],
+  "activationEvents": [
+    "onLanguage:pulsarscript",
+    "workspaceContains:**/AppManifest.json"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "pulsarscript",
+        "aliases": ["PulsarScript", "pulsarscript"],
+        "extensions": [".puls", ".poo"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pulsarscript",
+        "scopeName": "source.pulsarscript",
+        "path": "./syntaxes/pulsarscript.tmLanguage.json"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "AppManifest.json",
+        "url": "./schemas/app-manifest.schema.json"
+      }
+    ],
+    "configuration": {
+      "title": "PulsarScript",
+      "properties": {
+        "pulsarscript.serverCommand": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["bun", "run", "lsp/server.ts"],
+          "description": "Command and arguments used to launch the PulsarScript Language Server over stdio."
+        },
+        "pulsarscript.manifestPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit path to AppManifest.json for capability linting."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ."
+  }
+}

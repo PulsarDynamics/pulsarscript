@@ -58,16 +58,22 @@ interface LoopContext {
 interface CompilerFrame {
   scopeStack: Map<string, number>[];
   nextLocal: number;
+  localNames: string[];
   loops: LoopContext[];
   openBlocks: number[];
   tryDepth: number;
   upvalues: UpvalueDesc[];
 }
 
+export interface CompileOptions {
+  debug?: boolean;
+}
+
 function makeFrame(): CompilerFrame {
   return {
     scopeStack: [new Map()],
     nextLocal: 0,
+    localNames: [],
     loops: [],
     openBlocks: [],
     tryDepth: 0,
@@ -95,6 +101,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   currentLine = 1; // Track current source line for error mapping
   private currentFileIndex = 0;
   private trackFiles = false;
+  private emitDebug = false;
 
   private get frame(): CompilerFrame { return this.frames[this.frames.length - 1]; }
   private get scopeStack(): Map<string, number>[] { return this.frame.scopeStack; }
@@ -106,13 +113,14 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
   private get loops(): LoopContext[] { return this.frame.loops; }
   private get openBlocks(): number[] { return this.frame.openBlocks; }
 
-  static compile(statements: Stmt[], sources?: string[]): Chunk {
+  static compile(statements: Stmt[], sources?: string[], opts?: CompileOptions): Chunk {
     const compiler = new BytecodeCompiler();
-    compiler.compile(statements, sources);
+    compiler.compile(statements, sources, opts);
     return compiler.chunk;
   }
 
-  compile(statements: Stmt[], sources?: string[]): void {
+  compile(statements: Stmt[], sources?: string[], opts?: CompileOptions): void {
+    this.emitDebug = Boolean(opts?.debug);
     if (sources && sources.length > 1) {
       this.chunk.sources = [...sources];
       this.chunk.fileMap = [];
@@ -563,6 +571,7 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     };
     if (compiled.upvalues.length > 0) entry.upvalues = compiled.upvalues;
     if (selfSlot !== undefined) entry.selfSlot = selfSlot;
+    if (this.emitDebug && compiled.localNames.length > 0) entry.localNames = compiled.localNames;
     if (isTopLevelNamed) {
       this.functions.set(name, entry);
     }
@@ -1068,6 +1077,9 @@ export class BytecodeCompiler implements ExprVisitor<void>, StmtVisitor<void> {
     }
     const slot = this.nextLocal;
     currentScope.set(name, slot);
+    if (this.emitDebug) {
+      this.frame.localNames[slot] = name;
+    }
     this.nextLocal++;
     return slot;
   }

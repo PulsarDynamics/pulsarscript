@@ -1,13 +1,10 @@
 package vm
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -241,7 +238,7 @@ func (v Value) String() string {
 		parts := make([]string, len(keys))
 		for i, k := range keys {
 			name := k
-			if !identRe.MatchString(k) {
+			if !isIdentifier(k) {
 				name = quoteJSON(k)
 			}
 			val, _ := v.objectGet(k)
@@ -276,15 +273,26 @@ func sortedKeys(m map[string]Value) []string {
 	return keys
 }
 
-var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+func isIdentifier(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	c := s[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c = s[i]
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
 
 // quoteJSON writes s as a JSON string literal (no HTML escaping), as JSON.stringify does.
 func quoteJSON(s string) string {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(s)
-	return strings.TrimSuffix(buf.String(), "\n")
+	return string(AppendJSONString(make([]byte, 0, len(s)+2), s))
 }
 
 // FormatNumber renders a number like JavaScript's Number#toString: the shortest form that
@@ -312,9 +320,62 @@ func FormatNumber(f float64) string {
 	return mant + "e" + exp[:1] + digits
 }
 
-// numberLiteralRe is the text number() accepts: optional sign, decimal digits with an
-// optional fraction and exponent, surrounding whitespace allowed (SPEC 8).
-var numberLiteralRe = regexp.MustCompile(`^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$`)
+// isDecimalLiteral matches the exact grammar number() accepts: optional sign, decimal digits
+// with an optional fraction and exponent (with optional surrounding RE2 \s when allowSpace is true).
+func isDecimalLiteral(s string, allowSpace bool) bool {
+	start, end := 0, len(s)
+	if allowSpace {
+		isRE2Space := func(b byte) bool {
+			return b == ' ' || b == '\t' || b == '\n' || b == '\f' || b == '\r'
+		}
+		for start < end && isRE2Space(s[start]) {
+			start++
+		}
+		for end > start && isRE2Space(s[end-1]) {
+			end--
+		}
+	}
+	i := start
+	if i < end && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	if i >= end {
+		return false
+	}
+	hasInt := false
+	for i < end && s[i] >= '0' && s[i] <= '9' {
+		hasInt = true
+		i++
+	}
+	hasFrac := false
+	if i < end && s[i] == '.' {
+		i++
+		for i < end && s[i] >= '0' && s[i] <= '9' {
+			hasFrac = true
+			i++
+		}
+		if !hasInt && !hasFrac {
+			return false
+		}
+	} else if !hasInt {
+		return false
+	}
+	if i < end && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < end && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		expDigits := 0
+		for i < end && s[i] >= '0' && s[i] <= '9' {
+			expDigits++
+			i++
+		}
+		if expDigits == 0 {
+			return false
+		}
+	}
+	return i == end
+}
 
 // typeName is the result of typeOf (SPEC 3).
 func typeName(v Value) string {
@@ -404,36 +465,238 @@ type UpvalueDesc struct {
 
 // FunctionInfo describes a compiled function entry.
 type FunctionInfo struct {
-	Name     string        `json:"name"`
-	Address  int           `json:"address"`
-	Arity    int           `json:"arity"`
-	Locals   int           `json:"locals"`
-	Upvalues []UpvalueDesc `json:"upvalues,omitempty"`
-	SelfSlot *int          `json:"selfSlot,omitempty"`
+	Name       string        `json:"name"`
+	Address    int           `json:"address"`
+	Arity      int           `json:"arity"`
+	Locals     int           `json:"locals"`
+	Upvalues   []UpvalueDesc `json:"upvalues,omitempty"`
+	SelfSlot   *int          `json:"selfSlot,omitempty"`
+	LocalNames []string      `json:"localNames,omitempty"`
+}
+
+func jsonToInt(v any) (int, bool) {
+	f, ok := v.(float64)
+	if !ok || math.IsNaN(f) || math.IsInf(f, 0) || math.Trunc(f) != f {
+		return 0, false
+	}
+	const maxSafeInt = float64(int(^uint(0) >> 1))
+	const minSafeInt = -maxSafeInt - 1
+	if f < minSafeInt || f > maxSafeInt {
+		return 0, false
+	}
+	return int(f), true
+}
+
+func jsonOptString(obj map[string]any, key string) (string, error) {
+	v, exists := obj[key]
+	if !exists || v == nil {
+		return "", nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("field %q must be string", key)
+	}
+	return s, nil
+}
+
+func jsonOptInt(obj map[string]any, key string) (int, error) {
+	v, exists := obj[key]
+	if !exists || v == nil {
+		return 0, nil
+	}
+	n, ok := jsonToInt(v)
+	if !ok {
+		return 0, fmt.Errorf("field %q must be integer", key)
+	}
+	return n, nil
+}
+
+func jsonOptIntSlice(obj map[string]any, key string) ([]int, error) {
+	v, exists := obj[key]
+	if !exists || v == nil {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("field %q must be array", key)
+	}
+	out := make([]int, len(arr))
+	for i, elem := range arr {
+		n, ok := jsonToInt(elem)
+		if !ok {
+			return nil, fmt.Errorf("field %q[%d] must be integer", key, i)
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+func jsonOptStringSlice(obj map[string]any, key string) ([]string, error) {
+	v, exists := obj[key]
+	if !exists || v == nil {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("field %q must be array", key)
+	}
+	out := make([]string, len(arr))
+	for i, elem := range arr {
+		if elem == nil {
+			continue
+		}
+		s, ok := elem.(string)
+		if !ok {
+			return nil, fmt.Errorf("field %q[%d] must be string", key, i)
+		}
+		out[i] = s
+	}
+	return out, nil
+}
+
+func jsonOptFunctions(obj map[string]any, key string) ([]FunctionInfo, error) {
+	v, exists := obj[key]
+	if !exists || v == nil {
+		return nil, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("field %q must be array", key)
+	}
+	out := make([]FunctionInfo, 0, len(arr))
+	for i, elem := range arr {
+		m, ok := elem.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("field %q[%d] must be object", key, i)
+		}
+		name, err := jsonOptString(m, "name")
+		if err != nil {
+			return nil, err
+		}
+		addr, err := jsonOptInt(m, "address")
+		if err != nil {
+			return nil, err
+		}
+		arity, err := jsonOptInt(m, "arity")
+		if err != nil {
+			return nil, err
+		}
+		locals, err := jsonOptInt(m, "locals")
+		if err != nil {
+			return nil, err
+		}
+		var selfPtr *int
+		if sv, hasSelf := m["selfSlot"]; hasSelf && sv != nil {
+			sn, ok := jsonToInt(sv)
+			if !ok {
+				return nil, fmt.Errorf("field \"selfSlot\" must be integer")
+			}
+			selfPtr = &sn
+		}
+		localNames, err := jsonOptStringSlice(m, "localNames")
+		if err != nil {
+			return nil, err
+		}
+		var upvalues []UpvalueDesc
+		if uvRaw, hasUV := m["upvalues"]; hasUV && uvRaw != nil {
+			uvArr, ok := uvRaw.([]any)
+			if !ok {
+				return nil, fmt.Errorf("field \"upvalues\" must be array")
+			}
+			upvalues = make([]UpvalueDesc, len(uvArr))
+			for j, ue := range uvArr {
+				um, ok := ue.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("upvalues[%d] must be object", j)
+				}
+				if lv, exists := um["isLocal"]; exists && lv != nil {
+					b, ok := lv.(bool)
+					if !ok {
+						return nil, fmt.Errorf("upvalues[%d].isLocal must be boolean", j)
+					}
+					upvalues[j].IsLocal = b
+				}
+				idx, err := jsonOptInt(um, "index")
+				if err != nil {
+					return nil, err
+				}
+				upvalues[j].Index = idx
+			}
+		}
+		out = append(out, FunctionInfo{
+			Name:       name,
+			Address:    addr,
+			Arity:      arity,
+			Locals:     locals,
+			Upvalues:   upvalues,
+			SelfSlot:   selfPtr,
+			LocalNames: localNames,
+		})
+	}
+	return out, nil
 }
 
 // LoadModule parses a JSON-encoded chunk {constants: [...], code: [...]}.
 func LoadModule(data []byte) (Module, error) {
-	var raw struct {
-		Format     string         `json:"format"`
-		Version    int            `json:"version"`
-		Compiler   string         `json:"compiler"`
-		SourceHash string         `json:"sourceHash"`
-		Constants  []interface{}  `json:"constants"`
-		Code       []int          `json:"code"`
-		Functions  []FunctionInfo `json:"functions"`
-		LineMap    []int          `json:"lineMap"`
-		Sources    []string       `json:"sources"`
-		FileMap    []int          `json:"fileMap"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	parsed, err := ParseJSON(data)
+	if err != nil {
 		return Module{}, err
 	}
-	if err := checkHeader(raw.Format, raw.Version); err != nil {
+	raw, ok := parsed.(map[string]any)
+	if !ok {
+		return Module{}, errors.New("module JSON must be an object")
+	}
+	format, err := jsonOptString(raw, "format")
+	if err != nil {
 		return Module{}, err
 	}
-	constants := make([]Value, len(raw.Constants))
-	for i, c := range raw.Constants {
+	version, err := jsonOptInt(raw, "version")
+	if err != nil {
+		return Module{}, err
+	}
+	compiler, err := jsonOptString(raw, "compiler")
+	if err != nil {
+		return Module{}, err
+	}
+	sourceHash, err := jsonOptString(raw, "sourceHash")
+	if err != nil {
+		return Module{}, err
+	}
+	code, err := jsonOptIntSlice(raw, "code")
+	if err != nil {
+		return Module{}, err
+	}
+	lineMap, err := jsonOptIntSlice(raw, "lineMap")
+	if err != nil {
+		return Module{}, err
+	}
+	sources, err := jsonOptStringSlice(raw, "sources")
+	if err != nil {
+		return Module{}, err
+	}
+	fileMap, err := jsonOptIntSlice(raw, "fileMap")
+	if err != nil {
+		return Module{}, err
+	}
+	rawFns, err := jsonOptFunctions(raw, "functions")
+	if err != nil {
+		return Module{}, err
+	}
+
+	if err := checkHeader(format, version); err != nil {
+		return Module{}, err
+	}
+
+	var rawConsts []any
+	if cv, exists := raw["constants"]; exists && cv != nil {
+		arr, ok := cv.([]any)
+		if !ok {
+			return Module{}, errors.New("field \"constants\" must be array")
+		}
+		rawConsts = arr
+	}
+	constants := make([]Value, len(rawConsts))
+	for i, c := range rawConsts {
 		switch v := c.(type) {
 		case nil:
 			constants[i] = Nil()
@@ -449,16 +712,16 @@ func LoadModule(data []byte) (Module, error) {
 	}
 	funcs := make(map[int]FunctionInfo)
 	funcsByName := make(map[string]FunctionInfo)
-	for _, fn := range raw.Functions {
+	for _, fn := range rawFns {
 		funcs[fn.Address] = fn
 		if fn.Name != "" {
 			funcsByName[fn.Name] = fn
 		}
 	}
 	mod := Module{
-		Constants: constants, Code: raw.Code, Functions: funcs, FunctionsByName: funcsByName,
-		LineMap: raw.LineMap, Sources: raw.Sources, FileMap: raw.FileMap,
-		Version: raw.Version, Compiler: raw.Compiler, SourceHash: raw.SourceHash,
+		Constants: constants, Code: code, Functions: funcs, FunctionsByName: funcsByName,
+		LineMap: lineMap, Sources: sources, FileMap: fileMap,
+		Version: version, Compiler: compiler, SourceHash: sourceHash,
 	}
 	if err := VerifyModule(mod); err != nil {
 		return Module{}, fmt.Errorf("invalid module: %w", err)
@@ -535,6 +798,7 @@ type VM struct {
 	maxMemory        int64 // maximum estimated live memory in bytes (0 = unlimited)
 	memBytes         int64 // cumulative allocation estimate since last recomputeLiveMemory
 	heapObjects      int   // cumulative collection/closure allocations since last recompute
+	totalSteps       int   // total VM instructions executed
 	// 1-entry O(1) string indexing & rune length cache (LANG-07)
 	strCacheVal  string
 	strCacheByte int
@@ -556,6 +820,7 @@ type callFrame struct {
 	locals   int
 	name     string
 	arity    int
+	fnAddr   int
 	cl       *closure
 	callLine int
 	callFile string
@@ -980,6 +1245,108 @@ func (vm *VM) StackDepth() int { return len(vm.stack) }
 
 // Halted returns true if the VM has halted.
 func (vm *VM) Halted() bool { return vm.halted }
+
+// LineAtIP returns the 1-based source line mapped to instruction ip, or 0 if unavailable.
+func (vm *VM) LineAtIP(ip int) int {
+	if ip < 0 || ip >= len(vm.module.LineMap) {
+		return 0
+	}
+	return vm.module.LineMap[ip]
+}
+
+// FileAtIP returns the source filename mapped to instruction ip, or "" if single-file.
+func (vm *VM) FileAtIP(ip int) string {
+	if len(vm.module.Sources) == 0 {
+		return ""
+	}
+	if len(vm.module.Sources) == 1 {
+		return vm.module.Sources[0]
+	}
+	if ip < 0 || ip >= len(vm.module.FileMap) {
+		return ""
+	}
+	idx := vm.module.FileMap[ip]
+	if idx < 0 || idx >= len(vm.module.Sources) {
+		return ""
+	}
+	return vm.module.Sources[idx]
+}
+
+// StepsUsed returns the total instructions stepped by this VM.
+func (vm *VM) StepsUsed() int { return vm.totalSteps }
+
+// LiveMemory returns the current estimated live memory bytes and heap object count.
+func (vm *VM) LiveMemory() (int64, int) {
+	return vm.recomputeLiveMemory()
+}
+
+// BudgetConfig returns the VM's configured limits.
+func (vm *VM) BudgetConfig() (maxSteps int, maxDuration time.Duration, maxMemory int64, maxHeap int) {
+	return vm.maxSteps, vm.maxDuration, vm.maxMemory, vm.maxHeap
+}
+
+// GlobalsSnapshot returns a shallow copy of the VM's global variables.
+func (vm *VM) GlobalsSnapshot() map[string]Value {
+	out := make(map[string]Value, len(vm.globals))
+	for k, v := range vm.globals {
+		out[k] = v
+	}
+	return out
+}
+
+// Disassemble renders a human-readable bytecode listing for the loaded module.
+func (vm *VM) Disassemble() string {
+	mod := vm.module
+	var b strings.Builder
+	fmt.Fprintf(&b, "=== Bytecode Disassembly ===\n")
+	if mod.Version > 0 {
+		fmt.Fprintf(&b, "Format: version %d, %s, source %s\n", mod.Version, mod.Compiler, mod.SourceHash)
+	} else {
+		fmt.Fprintf(&b, "Format: version 0 (no header)\n")
+	}
+	fmt.Fprintf(&b, "Constants: %d\n", len(mod.Constants))
+	for i, c := range mod.Constants {
+		fmt.Fprintf(&b, "  [%d] %s\n", i, c.String())
+	}
+	fmt.Fprintf(&b, "\nFunctions: %d\n", len(mod.Functions))
+	addrs := make([]int, 0, len(mod.Functions))
+	for addr := range mod.Functions {
+		addrs = append(addrs, addr)
+	}
+	sort.Ints(addrs)
+	for _, addr := range addrs {
+		fn := mod.Functions[addr]
+		fmt.Fprintf(&b, "  %s @ %d (arity: %d, locals: %d)\n", fn.Name, addr, fn.Arity, fn.Locals)
+	}
+	fmt.Fprintf(&b, "\nCode: %d words\n", len(mod.Code))
+	for ip := 0; ip < len(mod.Code); {
+		lineInfo := ""
+		if ip < len(mod.LineMap) && mod.LineMap[ip] > 0 {
+			lineInfo = fmt.Sprintf(" ; line %d", mod.LineMap[ip])
+		}
+		op := byte(mod.Code[ip])
+		name, operands, _ := OpcodeName(op)
+		if operands == 0 {
+			fmt.Fprintf(&b, "  %04d: %s%s\n", ip, name, lineInfo)
+			ip++
+		} else if operands == 1 {
+			if ip+1 < len(mod.Code) {
+				fmt.Fprintf(&b, "  %04d: %s %d%s\n", ip, name, mod.Code[ip+1], lineInfo)
+			} else {
+				fmt.Fprintf(&b, "  %04d: %s ???%s\n", ip, name, lineInfo)
+			}
+			ip += 2
+		} else {
+			if ip+2 < len(mod.Code) {
+				fmt.Fprintf(&b, "  %04d: %s %d %d%s\n", ip, name, mod.Code[ip+1], mod.Code[ip+2], lineInfo)
+			} else {
+				fmt.Fprintf(&b, "  %04d: %s ???%s\n", ip, name, lineInfo)
+			}
+			ip += 3
+		}
+	}
+	return b.String()
+}
 
 // ListHandlers returns all registered handler functions.
 func (vm *VM) ListHandlers() []FunctionInfo {
@@ -1553,6 +1920,7 @@ func (vm *VM) Step() error {
 	op := byte(code[vm.ip])
 	vm.opIP = vm.ip
 	vm.ip++
+	vm.totalSteps++
 	switch op {
 	case OpConst:
 		if vm.ip >= len(code) {
@@ -2482,6 +2850,7 @@ func (vm *VM) callFunctionValue(callee Value, argCount int) error {
 		locals:   localCount,
 		name:     frameName,
 		arity:    argCount,
+		fnAddr:   target,
 		cl:       callee.cl,
 		callLine: vm.CurrentLine(),
 		callFile: vm.CurrentFile(),
@@ -2840,15 +3209,16 @@ func (vm *VM) DispatchHandler(name string, args []Value) (Value, error) {
 	return vm.DispatchHandlerWithBudget(name, args, vm.maxSteps, vm.maxDuration)
 }
 
-// DispatchHandlerWithBudget invokes a handler with step/time budgets to prevent runaway execution.
-func (vm *VM) DispatchHandlerWithBudget(name string, args []Value, maxSteps int, maxDuration time.Duration) (Value, error) {
+// PrepareHandlerCall sets up the VM stack and initial call frame to run handler `name`
+// with `args` without running yet, allowing a Debugger to step or continue into it.
+func (vm *VM) PrepareHandlerCall(name string, args []Value) error {
 	h, ok := vm.handlers[name]
 	if !ok {
-		return Value{}, fmt.Errorf("handler not found: %s", name)
+		return fmt.Errorf("handler not found: %s", name)
 	}
 	fn := h.info
 	if fn.Arity != len(args) {
-		return Value{}, fmt.Errorf("handler %s expects %d args, got %d", name, fn.Arity, len(args))
+		return fmt.Errorf("handler %s expects %d args, got %d", name, fn.Arity, len(args))
 	}
 	vm.halted = false
 	vm.yielded = false
@@ -2859,7 +3229,7 @@ func (vm *VM) DispatchHandlerWithBudget(name string, args []Value, maxSteps int,
 	vm.ip = fn.Address
 	for _, a := range args {
 		if err := vm.push(a); err != nil {
-			return Value{}, err
+			return err
 		}
 	}
 	localCount := fn.Locals
@@ -2867,13 +3237,21 @@ func (vm *VM) DispatchHandlerWithBudget(name string, args []Value, maxSteps int,
 		localCount = len(args)
 	}
 	if err := vm.ensureStackSize(localCount); err != nil {
-		return Value{}, err
+		return err
 	}
 	if fn.SelfSlot != nil && *fn.SelfSlot >= 0 && *fn.SelfSlot < len(vm.stack) {
 		vm.stack[*fn.SelfSlot] = h.fn
 	}
-	frame := callFrame{returnIP: len(vm.module.Code), base: 0, locals: localCount, name: fn.Name, arity: fn.Arity, cl: h.fn.cl}
+	frame := callFrame{returnIP: len(vm.module.Code), base: 0, locals: localCount, name: fn.Name, arity: fn.Arity, fnAddr: fn.Address, cl: h.fn.cl}
 	vm.frames = append(vm.frames, frame)
+	return nil
+}
+
+// DispatchHandlerWithBudget invokes a handler with step/time budgets to prevent runaway execution.
+func (vm *VM) DispatchHandlerWithBudget(name string, args []Value, maxSteps int, maxDuration time.Duration) (Value, error) {
+	if err := vm.PrepareHandlerCall(name, args); err != nil {
+		return Value{}, err
+	}
 	if err := vm.RunWithBudget(maxSteps, maxDuration); err != nil && !errors.Is(err, ErrYielded) {
 		return Value{}, err
 	}
@@ -2972,6 +3350,7 @@ func (vm *VM) DispatchEventWithBudget(name string, payload Value, maxSteps int, 
 			locals:   localCount,
 			name:     fnInfo.Name,
 			arity:    fnInfo.Arity,
+			fnAddr:   fnInfo.Address,
 			cl:       listener.cl,
 		})
 		vm.ip = fnInfo.Address

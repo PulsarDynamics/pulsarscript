@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -67,12 +66,6 @@ func fromInterface(x interface{}, depth int) (Value, error) {
 		return Number(float64(v)), nil
 	case int64:
 		return Number(float64(v)), nil
-	case json.Number:
-		f, err := v.Float64()
-		if err != nil {
-			return Value{}, err
-		}
-		return Number(f), nil
 	case string:
 		return String(v), nil
 	case []interface{}:
@@ -101,15 +94,6 @@ func fromInterface(x interface{}, depth int) (Value, error) {
 		}
 		return Object(out), nil
 	default:
-		// Anything else (structs, typed slices) goes through JSON once.
-		b, err := json.Marshal(v)
-		if err != nil {
-			return Value{}, fmt.Errorf("unsupported host value %T", x)
-		}
-		var decoded interface{}
-		if err := json.Unmarshal(b, &decoded); err != nil {
-			return Value{}, err
-		}
-		return fromInterface(decoded, depth)
+		return fromInterfaceFallback(x, depth)
 	}
 }

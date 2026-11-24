@@ -2,9 +2,20 @@ import { TokenType } from "./enums/TokenType";
 import type { Token } from "./interfaces/Token";
 import { ParseError } from "./Parser";
 
+export interface CommentToken {
+  kind: "line" | "block";
+  text: string;
+  line: number;
+  endLine: number;
+  column: number;
+  startOffset: number;
+  endOffset: number;
+}
+
 export class Lexer {
   private source: string;
   private tokens: Token[] = [];
+  public readonly comments: CommentToken[] = [];
   private start = 0;
   private current = 0;
   private line = 1;
@@ -43,7 +54,17 @@ export class Lexer {
     }
 
     const col = this.current - this.lineStart + 1;
-    this.tokens.push({ type: TokenType.EOF, lexeme: "", literal: null, line: this.line, column: col });
+    this.tokens.push({
+      type: TokenType.EOF,
+      lexeme: "",
+      literal: null,
+      line: this.line,
+      column: col,
+      endLine: this.line,
+      endColumn: col,
+      startOffset: this.current,
+      endOffset: this.current,
+    });
     return this.tokens;
   }
 
@@ -97,7 +118,17 @@ export class Lexer {
         if (this.match('=')) {
           this.addToken(TokenType.SLASH_EQUAL, null, "/=");
         } else if (this.match('/')) {
+          const startCol = this.start - this.lineStart + 1;
           while (this.peek() !== '\n' && !this.isAtEnd()) this.advance();
+          this.comments.push({
+            kind: "line",
+            text: this.source.substring(this.start, this.current),
+            line: this.line,
+            endLine: this.line,
+            column: startCol,
+            startOffset: this.start,
+            endOffset: this.current,
+          });
         } else if (this.match('*')) {
           this.blockComment();
         } else {
@@ -179,6 +210,15 @@ export class Lexer {
       if (this.peek() === '*' && this.peekNext() === '/') {
         this.advance();
         this.advance();
+        this.comments.push({
+          kind: "block",
+          text: this.source.substring(this.start, this.current),
+          line: startLine,
+          endLine: this.line,
+          column: startCol,
+          startOffset: this.start,
+          endOffset: this.current,
+        });
         return;
       }
       if (this.advance() === '\n') {
@@ -190,6 +230,7 @@ export class Lexer {
   }
 
   private string() {
+    const startLine = this.line;
     const startCol = this.start - this.lineStart + 1;
     let out = "";
     while (this.peek() !== '"' && !this.isAtEnd()) {
@@ -213,7 +254,19 @@ export class Lexer {
     this.advance();
 
     const text = this.source.substring(this.start, this.current);
-    this.tokens.push({ type: TokenType.STRING, lexeme: text, literal: out, line: this.line, column: startCol });
+    const endCol = this.current - this.lineStart + 1;
+    this.tokens.push({
+      type: TokenType.STRING,
+      lexeme: text,
+      literal: out,
+      line: this.line,
+      column: startCol,
+      endLine: this.line,
+      endColumn: endCol,
+      startOffset: this.start,
+      endOffset: this.current,
+    });
+    void startLine;
   }
 
   private scanTemplateSegment(isHead: boolean) {
@@ -229,6 +282,10 @@ export class Lexer {
           literal: out,
           line: this.line,
           column: startCol,
+          endLine: this.line,
+          endColumn: this.current - this.lineStart + 1,
+          startOffset: this.start,
+          endOffset: this.current,
         });
         return;
       }
@@ -243,6 +300,10 @@ export class Lexer {
           literal: out,
           line: this.line,
           column: startCol,
+          endLine: this.line,
+          endColumn: this.current - this.lineStart + 1,
+          startOffset: this.start,
+          endOffset: this.current,
         });
         return;
       }
@@ -414,12 +475,32 @@ export class Lexer {
   private makeToken(type: TokenType, lexeme?: string): Token {
     const text = lexeme !== undefined ? lexeme : this.source.substring(this.start, this.current);
     const col = this.start - this.lineStart + 1;
-    return { type, lexeme: text, literal: null, line: this.line, column: col };
+    return {
+      type,
+      lexeme: text,
+      literal: null,
+      line: this.line,
+      column: col,
+      endLine: this.line,
+      endColumn: this.current - this.lineStart + 1,
+      startOffset: this.start,
+      endOffset: this.current,
+    };
   }
 
   private addToken(type: TokenType, literal: any = null, lexeme?: string) {
     const text = lexeme !== undefined ? lexeme : this.source.substring(this.start, this.current);
     const col = this.start - this.lineStart + 1;
-    this.tokens.push({ type, lexeme: text, literal, line: this.line, column: col });
+    this.tokens.push({
+      type,
+      lexeme: text,
+      literal,
+      line: this.line,
+      column: col,
+      endLine: this.line,
+      endColumn: this.current - this.lineStart + 1,
+      startOffset: this.start,
+      endOffset: this.current,
+    });
   }
 }

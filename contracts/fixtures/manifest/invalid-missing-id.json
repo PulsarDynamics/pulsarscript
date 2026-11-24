@@ -1,0 +1,10 @@
+{
+  "name": "Missing Identifier App",
+  "version": "1.0.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "permissions": {
+    "scopes": ["fs.read"]
+  }
+}

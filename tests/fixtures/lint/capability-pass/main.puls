@@ -1,0 +1,6 @@
+function readNote(path) {
+  var theme = kvGet("theme");
+  var body = fsRead(path);
+  return { theme: theme, body: body };
+}
+registerHandler("readNote", readNote);

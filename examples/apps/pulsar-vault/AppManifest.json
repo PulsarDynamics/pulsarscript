@@ -1,0 +1,91 @@
+{
+  "id": "com.pulsaros.pulsar-vault",
+  "name": "Pulsar Vault",
+  "version": "1.0.0",
+  "description": "Local-first PulsarOS notes, Markdown task checklists, code snippets, and vault sync workspace powered by PulsarScript v1.2.",
+  "author": "PulsarOS & PulsarScript",
+  "icon": "icon.svg",
+  "ui": {
+    "entry": "ui/index.html",
+    "window": {
+      "width": 1160,
+      "height": 760,
+      "minWidth": 640,
+      "minHeight": 480
+    }
+  },
+  "script": {
+    "bundle": "scripts/main.json",
+    "source": "scripts/main.puls",
+    "handlers": [
+      {
+        "name": "initVault",
+        "mode": "rpc",
+        "description": "Ensure vault folders exist, seed starter notes on first launch, rebuild index, and return workspace snapshot"
+      },
+      {
+        "name": "listNotes",
+        "mode": "rpc",
+        "description": "Filter, search, sort, and summarize vault notes with health stats and tag counts"
+      },
+      {
+        "name": "getNote",
+        "mode": "rpc",
+        "description": "Read a single note with parsed Markdown tasks and reading metrics"
+      },
+      {
+        "name": "saveNote",
+        "mode": "rpc",
+        "description": "Create or update a note atomically, refresh the CoW tag index, and write a Base64 snapshot"
+      },
+      {
+        "name": "toggleTask",
+        "mode": "rpc",
+        "description": "Toggle a Markdown task checkbox line inside a note and persist atomically"
+      },
+      {
+        "name": "deleteNote",
+        "mode": "rpc",
+        "description": "Delete a note file and prune stale tag index entries"
+      },
+      {
+        "name": "exportBundlePage",
+        "mode": "rpc",
+        "description": "Export cursor-paginated Markdown digest, JSON archive, or Base64 backup within RPC budget"
+      },
+      {
+        "name": "getPrefs",
+        "mode": "rpc",
+        "description": "Read persisted KV preferences merged with defaults"
+      },
+      {
+        "name": "savePrefs",
+        "mode": "rpc",
+        "description": "Merge or reset KV preferences using objMerge and objDelete"
+      },
+      {
+        "name": "injectCorruptSample",
+        "mode": "rpc",
+        "description": "Write an intentionally malformed JSON sample note to demonstrate try/catch quarantine"
+      },
+      {
+        "name": "clearCorruptSamples",
+        "mode": "rpc",
+        "description": "Clean up quarantined corrupt sample files from the vault"
+      },
+      {
+        "name": "onFsChange",
+        "mode": "service",
+        "description": "Handle external fs.change events and notify the open Pulsar Vault window"
+      }
+    ]
+  },
+  "permissions": {
+    "scopes": [
+      "fs.read",
+      "fs.write",
+      "kv",
+      "events"
+    ]
+  }
+}

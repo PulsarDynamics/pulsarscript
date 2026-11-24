@@ -1,0 +1,361 @@
+// main.puls — Pulsar Vault entrypoint orchestrating modular helpers, RPC handlers, and live fs.change sync.
+
+import {
+  asObject,
+  encodeUtf8Base64,
+  formatShortDate,
+  getProp,
+  parseTasks,
+  renderDigestMarkdown,
+  slugify,
+  toggleTaskInBody,
+  VAULT_LOCK_ICON
+} from "./format.puls";
+
+import {
+  buildTagIndex,
+  computeVaultStats,
+  makeNoteComparator,
+  makeNoteMatcher,
+  pruneNoteFromTagIndex,
+  summarizeNote
+} from "./index.puls";
+
+import {
+  clearCorruptSampleFiles,
+  ensureVaultDirs,
+  EXPORTS_DIR,
+  getPrefs,
+  injectCorruptSampleFile,
+  loadAllNotes,
+  loadNoteById,
+  makeIdGenerator,
+  normalizeNoteInput,
+  removeNoteFiles,
+  savePrefs as persistPrefs,
+  seedStarterVaultIfNeeded,
+  writeNoteAtomic,
+  writeTagIndexFile
+} from "./storage.puls";
+
+const nextNoteId = makeIdGenerator("pv");
+
+function collectWorkspace(filterOpts) {
+  var prefs = getPrefs();
+  var req = asObject(filterOpts);
+  var activeSort = string(getProp(req, "sortBy", getProp(prefs, "sortBy", "updated_desc")));
+  var loaded = loadAllNotes();
+  var notes = loaded.notes;
+  var corrupt = loaded.corrupt;
+
+  var summaries = arrayMap(notes, summarizeNote);
+  var tagResult = buildTagIndex(notes);
+  writeTagIndexFile({
+    updatedAt: clock(),
+    tags: tagResult.index,
+    counts: tagResult.counts
+  });
+
+  var matcher = makeNoteMatcher(req);
+  var filtered = arrayFilter(summaries, matcher);
+  var comparator = makeNoteComparator(activeSort);
+  var sorted = arraySort(filtered, comparator);
+  var stats = computeVaultStats(summaries, arrayLen(corrupt), fsQuota());
+
+  var folders = ["inbox"];
+  for (var i = 0; i < arrayLen(summaries); i += 1) {
+    var folderName = summaries[i].folder;
+    if (!arrayIncludes(folders, folderName)) {
+      folders[arrayLen(folders)] = folderName;
+    }
+  }
+
+  return {
+    ok: true,
+    lockIcon: VAULT_LOCK_ICON,
+    notes: sorted,
+    totalCount: arrayLen(summaries),
+    folders: arraySort(folders),
+    tagIndex: tagResult.index,
+    tagCounts: tagResult.counts,
+    tags: tagResult.sortedTags,
+    stats: stats,
+    corrupt: corrupt,
+    prefs: prefs,
+    activeFilter: {
+      q: string(getProp(req, "q", "")),
+      tag: string(getProp(req, "tag", "")),
+      kind: string(getProp(req, "kind", "all")),
+      folder: string(getProp(req, "folder", "all")),
+      pinnedOnly: getProp(req, "pinnedOnly", false) == true,
+      sortBy: activeSort
+    }
+  };
+}
+
+function initVault(req) {
+  ensureVaultDirs();
+  var seeded = seedStarterVaultIfNeeded(nextNoteId);
+  var workspace = collectWorkspace(req);
+  return objMerge(workspace, { seeded: seeded });
+}
+
+function listNotes(req) {
+  return collectWorkspace(req);
+}
+
+function getNote(req) {
+  var input = asObject(req);
+  var id = trim(string(getProp(input, "id", "")));
+  if (len(id) == 0) {
+    return { ok: false, error: "Note id is required" };
+  }
+  var note = loadNoteById(id);
+  if (note == nil) {
+    return { ok: false, error: `Note '${id}' not found` };
+  }
+  var tasks = parseTasks(getProp(note, "body", ""));
+  var summary = summarizeNote(note);
+  var hasSnapshot = fsExists(`snapshots/${id}.b64`);
+  return {
+    ok: true,
+    note: objMerge(note, {
+      tasks: tasks,
+      summary: summary,
+      hasSnapshot: hasSnapshot
+    })
+  };
+}
+
+function saveNote(req) {
+  var input = asObject(req);
+  var prefs = getPrefs();
+  var noteInput = objHas(input, "note") ? asObject(input.note) : input;
+  var reqId = trim(string(getProp(noteInput, "id", "")));
+  var existing = len(reqId) > 0 ? loadNoteById(slugify(reqId)) : nil;
+  var normalized = normalizeNoteInput(noteInput, existing, nextNoteId);
+  var writeResult = writeNoteAtomic(normalized, getProp(prefs, "autoSnapshot", true) == true);
+  var tasks = parseTasks(normalized.body);
+  var workspace = collectWorkspace(getProp(input, "filter", {}));
+
+  emit("vault.note.saved", {
+    id: normalized.id,
+    title: normalized.title,
+    revision: normalized.revision,
+    at: normalized.updatedAt
+  });
+
+  return objMerge(workspace, {
+    savedNote: objMerge(normalized, {
+      tasks: tasks,
+      summary: summarizeNote(normalized)
+    }),
+    storage: writeResult
+  });
+}
+
+function toggleTask(req) {
+  var input = asObject(req);
+  var id = trim(string(getProp(input, "id", "")));
+  var lineIndex = toNumberOr(getProp(input, "lineIndex", -1), -1);
+  if (len(id) == 0) {
+    return { ok: false, error: "Note id is required" };
+  }
+  var existing = loadNoteById(id);
+  if (existing == nil) {
+    return { ok: false, error: `Note '${id}' not found` };
+  }
+
+  var toggled = toggleTaskInBody(getProp(existing, "body", ""), floor(lineIndex));
+  if (!toggled.ok) {
+    return { ok: false, error: `Line ${lineIndex} is not a Markdown task item` };
+  }
+
+  var prefs = getPrefs();
+  var updated = normalizeNoteInput({ body: toggled.body }, existing, nextNoteId);
+  writeNoteAtomic(updated, getProp(prefs, "autoSnapshot", true) == true);
+  var workspace = collectWorkspace(getProp(input, "filter", {}));
+
+  return objMerge(workspace, {
+    toggledDone: toggled.toggledDone,
+    savedNote: objMerge(updated, {
+      tasks: parseTasks(updated.body),
+      summary: summarizeNote(updated)
+    })
+  });
+}
+
+function deleteNote(req) {
+  var input = asObject(req);
+  var id = trim(string(getProp(input, "id", "")));
+  if (len(id) == 0) {
+    return { ok: false, error: "Note id is required" };
+  }
+  var loadedBefore = loadAllNotes();
+  var tagResBefore = buildTagIndex(loadedBefore.notes);
+  var prunedTags = pruneNoteFromTagIndex(tagResBefore.index, id);
+  var deleted = removeNoteFiles(id);
+  var workspace = collectWorkspace(getProp(input, "filter", {}));
+
+  emit("vault.note.deleted", { id: id, deleted: deleted, at: clock() });
+  return objMerge(workspace, {
+    deletedId: id,
+    deleted: deleted,
+    prunedTagKeys: objKeys(prunedTags)
+  });
+}
+
+function exportBundlePage(req) {
+  ensureVaultDirs();
+  var input = asObject(req);
+  var prefs = getPrefs();
+  var format = toLower(trim(string(getProp(input, "format", "markdown"))));
+  if (format != "markdown" && format != "json" && format != "base64") {
+    format = "markdown";
+  }
+
+  var rawCursor = getProp(input, "cursor", 0);
+  var parsedCursor = typeOf(rawCursor) == "string"
+    ? parseInt(rawCursor, 10)
+    : number(rawCursor);
+  var cursor = parsedCursor == nil ? 0 : max(0, floor(parsedCursor));
+
+  var rawPageSize = getProp(input, "pageSize", getProp(prefs, "pageSize", 4));
+  var pageSize = clamp(floor(toNumberOr(rawPageSize, 4)), 1, 12);
+
+  var loaded = loadAllNotes();
+  var sortedNotes = arraySort(loaded.notes, makeNoteComparator(getProp(prefs, "sortBy", "updated_desc")));
+  var totalNotes = arrayLen(sortedNotes);
+  var totalPages = max(1, ceil(totalNotes / pageSize));
+
+  var clampedStart = totalNotes == 0 ? 0 : min(cursor, max(0, totalNotes - 1));
+  var endIdx = min(totalNotes, clampedStart + pageSize);
+  var pageSlice = totalNotes == 0 ? [] : arraySlice(sortedNotes, clampedStart, endIdx);
+  var pageNum = totalNotes == 0 ? 1 : floor(clampedStart / pageSize) + 1;
+  var hasMore = endIdx < totalNotes;
+  var nextCursor = hasMore ? endIdx : nil;
+
+  var headerSig = concat(
+    fromCharCode(0x50),
+    fromCharCode(0x56),
+    "-",
+    padStart(string(pageNum), 2, "0")
+  );
+
+  var exportedPath = "";
+  var content = "";
+  if (format == "json") {
+    content = jsonStringify({
+      signature: headerSig,
+      page: pageNum,
+      totalPages: totalPages,
+      totalNotes: totalNotes,
+      exportedAt: formatShortDate(clock()),
+      notes: pageSlice
+    });
+    exportedPath = `${EXPORTS_DIR}/vault-page-${pageNum}.json`;
+    fsWrite(exportedPath, content);
+  } else if (format == "base64") {
+    var payloadJson = jsonStringify({
+      signature: headerSig,
+      page: pageNum,
+      notes: pageSlice
+    });
+    content = encodeUtf8Base64(payloadJson);
+    exportedPath = `${EXPORTS_DIR}/vault-page-${pageNum}.b64`;
+    fsWriteBase64(exportedPath, content);
+  } else {
+    content = renderDigestMarkdown(pageSlice, {
+      page: pageNum,
+      totalPages: totalPages,
+      totalNotes: totalNotes,
+      exportedAt: formatShortDate(clock())
+    });
+    exportedPath = `${EXPORTS_DIR}/vault-page-${pageNum}.md`;
+    fsWrite(exportedPath, content);
+  }
+
+  return {
+    ok: true,
+    format: format,
+    signature: headerSig,
+    page: pageNum,
+    pageSize: pageSize,
+    totalPages: totalPages,
+    totalNotes: totalNotes,
+    cursor: clampedStart,
+    nextCursor: nextCursor,
+    done: !hasMore,
+    noteCount: arrayLen(pageSlice),
+    exportedPath: exportedPath,
+    content: content
+  };
+}
+
+function getPrefsHandler(req) {
+  return {
+    ok: true,
+    prefs: getPrefs()
+  };
+}
+
+function savePrefsHandler(req) {
+  var nextPrefs = persistPrefs(req);
+  var workspace = collectWorkspace({});
+  return objMerge(workspace, { prefs: nextPrefs });
+}
+
+function injectCorruptSample(req) {
+  var path = injectCorruptSampleFile();
+  var workspace = collectWorkspace(asObject(req));
+  return objMerge(workspace, { injectedPath: path });
+}
+
+function clearCorruptSamples(req) {
+  var removed = clearCorruptSampleFiles();
+  var workspace = collectWorkspace(asObject(req));
+  return objMerge(workspace, { removedPaths: removed });
+}
+
+function onFsChange(payload) {
+  var ev = asObject(payload);
+  var changedPath = string(getProp(ev, "path", "notes/external.json"));
+  var action = string(getProp(ev, "action", "modified"));
+  var workspace = collectWorkspace({});
+  var syncPayload = {
+    type: "vault.sync",
+    path: changedPath,
+    action: action,
+    totalCount: workspace.totalCount,
+    openTasks: workspace.stats.openTasks,
+    corruptCount: arrayLen(workspace.corrupt),
+    healthScore: workspace.stats.healthScore,
+    at: clock()
+  };
+
+  emit("vault.sync", syncPayload);
+  notifyWindow(syncPayload);
+
+  return {
+    synced: true,
+    totalCount: workspace.totalCount,
+    corruptCount: arrayLen(workspace.corrupt),
+    path: changedPath,
+    action: action
+  };
+}
+
+registerHandler("initVault", initVault);
+registerHandler("listNotes", listNotes);
+registerHandler("getNote", getNote);
+registerHandler("saveNote", saveNote);
+registerHandler("toggleTask", toggleTask);
+registerHandler("deleteNote", deleteNote);
+registerHandler("exportBundlePage", exportBundlePage);
+registerHandler("getPrefs", getPrefsHandler);
+registerHandler("savePrefs", savePrefsHandler);
+registerHandler("injectCorruptSample", injectCorruptSample);
+registerHandler("clearCorruptSamples", clearCorruptSamples);
+registerHandler("onFsChange", onFsChange);
+
+on("fs.change", onFsChange);

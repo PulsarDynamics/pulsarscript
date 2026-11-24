@@ -1,0 +1,5 @@
+var deadVar = 10;
+function deadHelper(unusedParam) {
+  return 1;
+}
+print("ok");

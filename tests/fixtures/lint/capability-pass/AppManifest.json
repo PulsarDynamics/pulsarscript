@@ -1,0 +1,14 @@
+{
+  "id": "com.example.lintpass",
+  "name": "Lint Pass App",
+  "version": "1.0.0",
+  "ui": { "entry": "ui/index.html" },
+  "script": {
+    "bundle": "main.json",
+    "source": "main.puls",
+    "handlers": [{ "name": "readNote", "mode": "rpc" }]
+  },
+  "permissions": {
+    "scopes": ["fs.read", "kv"]
+  }
+}

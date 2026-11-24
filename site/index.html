@@ -51,6 +51,7 @@
             <li><a href="#benchmarks">Benchmarks</a></li>
             <li><a href="#api">API Explorer</a></li>
             <li><a href="#quickstart">Quickstart</a></li>
+            <li><a href="./docs.html">Docs</a></li>
           </ul>
         </nav>
 
@@ -84,7 +85,8 @@
           </p>
 
           <div class="cta-row">
-            <a class="btn btn-primary" href="#playground">Open Live Sandbox</a>
+            <a class="btn btn-primary" href="#playground">Open Script Studio</a>
+            <a class="btn btn-secondary" href="./docs.html">Read Generated Docs</a>
             <a class="btn btn-secondary" href="#api">Explore 97 Functions</a>
           </div>
 
@@ -134,20 +136,7 @@
             </div>
           </div>
 
-          <pre class="code-block" id="hero-code-preview" tabindex="0"><code><span class="tok-kw">function</span> makeCounter(start, step) {
-  <span class="tok-kw">var</span> value = start;
-  <span class="tok-kw">return</span> <span class="tok-kw">function</span>() {
-    <span class="tok-kw">var</span> current = value;
-    value += step;
-    <span class="tok-kw">return</span> current;
-  };
-}
-
-<span class="tok-kw">var</span> nextId = makeCounter(<span class="tok-num">100</span>, <span class="tok-num">10</span>);
-<span class="tok-kw">var</span> ids = <span class="tok-fn">arrayMap</span>([<span class="tok-num">0</span>, <span class="tok-num">0</span>, <span class="tok-num">0</span>], <span class="tok-kw">function</span>(_) {
-  <span class="tok-kw">return</span> nextId();
-});
-<span class="tok-kw">print</span>(<span class="tok-str">"ids: "</span> + <span class="tok-fn">jsonStringify</span>(ids));</code></pre>
+          <pre class="code-block has-lines" id="hero-code-preview" tabindex="0"><code><span class="code-line"><span class="tok-kw">function</span> makeCounter(start, step) {</span><span class="code-line">  <span class="tok-kw">var</span> value = start;</span><span class="code-line">  <span class="tok-kw">return</span> <span class="tok-kw">function</span>() {</span><span class="code-line">    <span class="tok-kw">var</span> current = value;</span><span class="code-line">    value += step;</span><span class="code-line">    <span class="tok-kw">return</span> current;</span><span class="code-line">  };</span><span class="code-line">}</span><span class="code-line"></span><span class="code-line"><span class="tok-kw">var</span> nextId = makeCounter(<span class="tok-num">100</span>, <span class="tok-num">10</span>);</span><span class="code-line"><span class="tok-kw">var</span> ids = <span class="tok-fn">arrayMap</span>([<span class="tok-num">0</span>, <span class="tok-num">0</span>, <span class="tok-num">0</span>], <span class="tok-kw">function</span>(_) {</span><span class="code-line">  <span class="tok-kw">return</span> nextId();</span><span class="code-line">});</span><span class="code-line"><span class="tok-kw">print</span>(<span class="tok-str">"ids: "</span> + <span class="tok-fn">jsonStringify</span>(ids));</span></code></pre>
 
           <div class="output-block" id="hero-output" data-stage="ok">
             <span class="output-label">$ pulsar run · live browser runtime</span>ids: [100,110,120]</div>
@@ -155,6 +144,7 @@
           <div class="telemetry-strip">
             <div class="telemetry-pills">
               <span class="telemetry-pill" id="hero-status-pill">Status: OK</span>
+              <span class="telemetry-pill" id="hero-lines-pill">14 lines</span>
               <span class="telemetry-pill" id="hero-steps-pill">Steps: 17</span>
               <span class="telemetry-pill" id="hero-time-pill">0.8 ms</span>
             </div>
@@ -166,10 +156,10 @@
     <section class="band" id="playground">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Live Compiler &amp; Bytecode v3 Studio</span>
-          <h2>Edit code, toggle host capabilities, test the cage live.</h2>
+          <span class="eyebrow">Script Studio · Go VM on WebAssembly</span>
+          <h2>Edit, format, lint, run, and step-debug in the Go VM cage.</h2>
           <p class="lead">
-            Every keystroke runs against PulsarScript's real browser-bundled compiler, static analyzer, Bytecode v3 emitter, and sandboxed interpreter—under hard step, string, and memory caps.
+            Compiles <code>.puls</code> to Bytecode v3 in-browser and lazy-loads the Go VM on WebAssembly with live step, wall-time, and heap caps—paired with an In-Memory Mock Host (<code>fs</code>, <code>kv</code>, <code>events</code>) and line debugger.
           </p>
         </div>
 
@@ -201,15 +191,27 @@
               </div>
             </div>
 
+            <div class="studio-engine-bar">
+              <div class="studio-engine-badges">
+                <span class="engine-pill" id="studio-engine-badge" data-ready="false">Engine: Go VM · WebAssembly (lazy-load on run)</span>
+                <span class="mock-host-pill" id="studio-mock-badge">In-Memory Mock Host (fs / kv / events)</span>
+              </div>
+              <span class="badge badge-core" id="studio-lint-pill">Lint: ready</span>
+            </div>
+
             <div class="showcase-split">
               <div class="code-panel">
                 <div class="code-panel-bar">
                   <label for="sandbox-code" class="code-panel-title">
                     <span class="pulse-dot" aria-hidden="true"></span>
                     <span id="studio-file-label">sandbox.puls (editable · Cmd/Ctrl+Enter)</span>
+                    <span class="code-line-count" id="studio-line-count">16 lines</span>
                   </label>
                   <div class="sandbox-actions">
                     <button type="button" class="btn btn-run" id="studio-run-btn">Run</button>
+                    <button type="button" class="btn btn-secondary" id="studio-debug-btn">Debug</button>
+                    <button type="button" class="btn btn-dark-ghost" id="studio-fmt-btn">Format</button>
+                    <button type="button" class="btn btn-dark-ghost" id="studio-lint-btn">Lint</button>
                     <button type="button" class="btn btn-dark-ghost" id="studio-reset-btn">Reset</button>
                     <span class="copy-wrap">
                       <button type="button" class="copy-button" command="--copy" commandfor="sandbox-code">
@@ -223,7 +225,10 @@
                   </div>
                 </div>
                 <div class="sandbox-editor-wrap">
-                  <textarea id="sandbox-code" class="sandbox-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">function makeCounter(start, step) {
+                  <div class="code-gutter" id="studio-gutter" aria-label="Editor line numbers and breakpoints">
+                    <div class="code-gutter-inner" id="studio-gutter-inner"></div>
+                  </div>
+                  <textarea id="sandbox-code" class="sandbox-textarea" wrap="off" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">function makeCounter(start, step) {
   var value = start;
   return function() {
     var current = value;
@@ -242,43 +247,117 @@ print("type: " + typeOf(nextId) + " -> " + string(nextId));</textarea>
                 </div>
               </div>
 
-              <div class="studio-stack">
-                <div class="code-panel">
-                  <div class="code-panel-bar">
-                    <span class="code-panel-title">Runtime Output &amp; Sandbox Telemetry</span>
-                    <span class="stage-badge" id="studio-stage-badge" data-ok="true">OK</span>
-                  </div>
-                  <div class="output-block" id="studio-output" data-stage="ok">
-                    <span class="output-label">Stdout / Host Result</span>ids: [100,110,120]
-type: function -&gt; &lt;fn anonymous&gt;</div>
-                  <div class="budget-meters">
-                    <div class="meter-item">
-                      <div class="meter-head">
-                        <span>Step Budget</span>
-                        <span id="studio-steps-text" class="mono-num">17 / 50,000</span>
-                      </div>
-                      <progress id="studio-steps-bar" class="budget-progress" max="50000" value="17" aria-label="Step budget usage"></progress>
-                    </div>
-                    <div class="meter-item">
-                      <div class="meter-head">
-                        <span>Live Heap</span>
-                        <span id="studio-mem-text" class="mono-num">0.2 KiB / 2 MiB</span>
-                      </div>
-                      <progress id="studio-mem-bar" class="budget-progress" max="2097152" value="256" aria-label="Memory budget usage"></progress>
-                    </div>
-                  </div>
-                  <span class="visually-hidden" id="studio-live-status" role="status"></span>
+              <div class="tabs" data-tabs="studio" id="studio-inspector-tabs">
+                <div class="tablist" role="tablist" focusgroup="tablist nomemory" aria-label="Studio inspector views">
+                  <button type="button" role="tab" id="studio-tab-output" aria-controls="studio-panel-output" aria-selected="true" focusgroupstart>Output &amp; Telemetry</button>
+                  <button type="button" role="tab" id="studio-tab-debug" aria-controls="studio-panel-debug" aria-selected="false" tabindex="-1">Debugger</button>
+                  <button type="button" role="tab" id="studio-tab-bytecode" aria-controls="studio-panel-bytecode" aria-selected="false" tabindex="-1">Bytecode v3</button>
+                  <button type="button" role="tab" id="studio-tab-lint" aria-controls="studio-panel-lint" aria-selected="false" tabindex="-1">Lint &amp; Mock Host</button>
                 </div>
 
-                <div class="code-panel">
-                  <div class="code-panel-bar">
-                    <span class="code-panel-title">Compiled Bytecode v3</span>
-                    <span id="studio-bc-meta">96 words · 13 constants · 3 fn</span>
+                <div class="tab-panels">
+                  <div role="tabpanel" id="studio-panel-output" aria-labelledby="studio-tab-output">
+                    <div class="panel-surface">
+                      <div class="code-panel">
+                        <div class="code-panel-bar">
+                          <span class="code-panel-title">Runtime Output &amp; Sandbox Telemetry</span>
+                          <span class="stage-badge" id="studio-stage-badge" data-ok="true">OK</span>
+                        </div>
+                        <div class="output-block" id="studio-output" data-stage="ok">
+                          <span class="output-label">Stdout / Host Result</span>ids: [100,110,120]
+type: function -&gt; &lt;fn anonymous&gt;</div>
+                        <div class="budget-meters">
+                          <div class="meter-item">
+                            <div class="meter-head">
+                              <span>Step Budget</span>
+                              <span id="studio-steps-text" class="mono-num">17 / 50,000</span>
+                            </div>
+                            <progress id="studio-steps-bar" class="budget-progress" max="50000" value="17" aria-label="Step budget usage"></progress>
+                          </div>
+                          <div class="meter-item">
+                            <div class="meter-head">
+                              <span>Wall Time</span>
+                              <span id="studio-time-text" class="mono-num">0.2 ms / 500 ms</span>
+                            </div>
+                            <progress id="studio-time-bar" class="budget-progress" max="500" value="0.2" aria-label="Wall-time budget usage"></progress>
+                          </div>
+                          <div class="meter-item">
+                            <div class="meter-head">
+                              <span>Live Heap</span>
+                              <span id="studio-mem-text" class="mono-num">0.2 KiB / 2 MiB</span>
+                            </div>
+                            <progress id="studio-mem-bar" class="budget-progress" max="2097152" value="256" aria-label="Memory budget usage"></progress>
+                          </div>
+                        </div>
+                        <span class="visually-hidden" id="studio-live-status" role="status"></span>
+                      </div>
+                    </div>
                   </div>
-                  <pre class="code-block" id="studio-disasm" tabindex="0"><code>  0000: JUMP            32  ; line 1
+
+                  <div role="tabpanel" id="studio-panel-debug" aria-labelledby="studio-tab-debug" hidden="until-found">
+                    <div class="panel-surface">
+                      <div class="debug-toolbar">
+                        <label class="debug-bp-wrap" for="debug-breakpoints">
+                          Breakpoints
+                          <input type="text" id="debug-breakpoints" class="debug-bp-input" placeholder="e.g. 4, 12" autocomplete="off">
+                        </label>
+                        <button type="button" class="btn btn-run" id="debug-start-btn">Start / Restart</button>
+                        <button type="button" class="btn btn-secondary" id="debug-continue-btn" disabled>Continue</button>
+                        <button type="button" class="btn btn-secondary" id="debug-over-btn" disabled>Step Over</button>
+                        <button type="button" class="btn btn-secondary" id="debug-in-btn" disabled>Step In</button>
+                        <button type="button" class="btn btn-secondary" id="debug-out-btn" disabled>Step Out</button>
+                        <button type="button" class="btn btn-dark-ghost" id="debug-stop-btn" disabled>Stop</button>
+                      </div>
+
+                      <div class="debug-status-bar">
+                        <span id="debug-state-text">Idle — set breakpoint lines or click Debug to inspect frames.</span>
+                        <span class="debug-paused-pill" id="debug-paused-badge" hidden>Wall-time budget paused at breakpoint</span>
+                      </div>
+
+                      <div class="debug-grid">
+                        <div class="debug-pane">
+                          <h4>Call Stack</h4>
+                          <div id="debug-stack">No active debug session.</div>
+                        </div>
+                        <div class="debug-pane">
+                          <h4>Locals &amp; Upvalues</h4>
+                          <div id="debug-locals">No active frame locals.</div>
+                        </div>
+                        <div class="debug-pane">
+                          <h4>Globals</h4>
+                          <div id="debug-globals">No globals snapshot yet.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div role="tabpanel" id="studio-panel-bytecode" aria-labelledby="studio-tab-bytecode" hidden="until-found">
+                    <div class="panel-surface">
+                      <div class="code-panel">
+                        <div class="code-panel-bar">
+                          <span class="code-panel-title">Compiled Bytecode v3</span>
+                          <span id="studio-bc-meta">96 words · 13 constants · 3 fn</span>
+                        </div>
+                        <pre class="code-block" id="studio-disasm" tabindex="0"><code>  0000: JUMP            32  ; line 1
 ; fn makeCounter (arity=2, locals=3) @ 0002
   0002: GET_LOCAL       0  ; line 2
   0004: SET_LOCAL       2  ; line 2</code></pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div role="tabpanel" id="studio-panel-lint" aria-labelledby="studio-tab-lint" hidden="until-found">
+                    <div class="panel-surface">
+                      <p id="studio-lint-summary">Click Lint to check unused bindings, shadowing, unknown host calls, and active capability scopes.</p>
+                      <ul class="lint-list" id="studio-lint-list"></ul>
+                      <div class="debug-pane">
+                        <h4>In-Memory Mock Host Calls</h4>
+                        <ul class="mock-call-list" id="studio-mock-calls">
+                          <li>No mock host calls recorded yet.</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -707,9 +786,9 @@ cd vm &amp;&amp; go test -fuzz=FuzzLoadModuleAndRun -fuzztime=30s</code></pre>
       <div class="container">
         <div class="section-head">
           <span class="eyebrow">Release Completeness · Gate Status</span>
-          <h2>v1.2 Language &amp; VM Complete — What's Next?</h2>
+          <h2>v1.2 Language, VM &amp; Gate G6 Tooling Complete</h2>
           <p class="lead">
-            All core language, runtime, standard library, and hardening deliverables (<code>LANG-01</code>–<code>LANG-18</code>, excluding <code>LANG-16</code>) are complete and verified. Remaining planned items sit cleanly in optional Gate G6 developer tooling.
+            All core language, Go VM, standard library, and hardening deliverables (<code>LANG-01</code>–<code>LANG-18</code>, except deferred interpreter retirement <code>LANG-16</code>) plus Gate G6 tooling in <code>pulsarscript</code> (<code>DX-01</code>–<code>DX-06</code>) and shared manifest contracts (<code>APP-04</code>) are complete.
           </p>
         </div>
 
@@ -722,17 +801,17 @@ cd vm &amp;&amp; go test -fuzz=FuzzLoadModuleAndRun -fuzztime=30s</code></pre>
 
         <div class="accordion" id="roadmap-accordion">
           <details class="roadmap-item" open>
-            <summary>Gate G6 — Optional Developer Tooling (DX-01 to DX-07)</summary>
+            <summary>Gate G6 — Developer Tooling (DX-01 to DX-06 Shipped; DX-07 in pulsaros-api)</summary>
             <div class="accordion-body">
-              <p>These tooling enhancements build on the finished v1.2 compiler and registry without changing language semantics:</p>
+              <p>Complete developer workflow built on the v1.2 AST, bytecode compiler, Go VM, and shared <code>vm/hostapi.json</code> registry:</p>
               <ul class="dx-list">
-                <li><span class="dx-id">DX-01 · fruit fmt</span> — AST formatter preserving comments and blank lines idempotently across the codebase.</li>
-                <li><span class="dx-id">DX-02 · fruit lint</span> — Static lints for unused bindings, shadowing, unknown host calls, and <code>AppManifest.json</code> capability mismatches.</li>
-                <li><span class="dx-id">DX-03 · LSP &amp; VS Code</span> — Language Server diagnostics, hover docs, and completions generated directly from <code>vm/hostapi.json</code>.</li>
-                <li><span class="dx-id">DX-04 · Go VM on WASM</span> — Compile the Go VM to WebAssembly for browser Script Studio execution (unlocking later retirement of the TypeScript interpreter in <code>LANG-16</code>).</li>
-                <li><span class="dx-id">DX-05 · Breakpoint Debugger</span> — Line-map breakpoints, single-step inspection of locals/upvalues, and paused budget meters in Script Studio.</li>
-                <li><span class="dx-id">DX-06 · Generated Release Docs</span> — Multi-page docs builder generated automatically from <code>SPEC.md</code>, <code>hostapi.json</code>, and conformance cases.</li>
-                <li><span class="dx-id">DX-07 · fruit dev Workbench</span> — Local mock-host iframe + Go VM live-reload harness and <code>fruit create</code> app templates inside <code>pulsaros-api</code>.</li>
+                <li><span class="dx-id">DX-01 · Formatter (Done)</span> — AST formatter (<code>bun run fmt</code>) preserving comments and blank lines idempotently across the conformance suite.</li>
+                <li><span class="dx-id">DX-02 · Linter (Done)</span> — Static lints (<code>bun run lint</code>) for unused bindings, shadowing, unknown host calls, and <code>AppManifest.json</code> capability scopes.</li>
+                <li><span class="dx-id">DX-03 · LSP &amp; VS Code (Done)</span> — Stdio Language Server (<code>bun run lsp</code>) and VS Code extension with completion, hover, signatures, go-to-definition, and manifest schema validation.</li>
+                <li><span class="dx-id">DX-04 · Go VM on WASM (Done)</span> — WebAssembly build (<code>site/pulsarvm.wasm</code>) lazy-loaded in Script Studio with an In-Memory Mock Host (<code>fs</code>, <code>kv</code>, <code>events</code>).</li>
+                <li><span class="dx-id">DX-05 · Breakpoint Debugger (Done)</span> — Line-map breakpoints, single-step inspection (<code>In</code>/<code>Over</code>/<code>Out</code>), locals/globals views, and paused wall-time meters in <code>vmrun -debug</code> and Script Studio.</li>
+                <li><span class="dx-id">DX-06 · Generated Release Docs (Done)</span> — Generated documentation portal (<a href="./docs.html"><code>docs.html</code></a>) built from <code>SPEC.md</code>, <code>vm/hostapi.json</code>, manifest schema, first-app guide, and verified conformance examples.</li>
+                <li><span class="dx-id">DX-07 · fruit dev Workbench (pulsaros-api)</span> — Local mock-host iframe + Go VM live-reload harness and <code>fruit create</code> app templates live in the sibling <code>pulsaros-api</code> repository.</li>
               </ul>
             </div>
           </details>

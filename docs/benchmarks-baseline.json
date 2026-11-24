@@ -1,0 +1,60 @@
+{
+  "recordedAt": "2026-11-24",
+  "specVersion": "1.0",
+  "runtimeVersion": "1.2.0",
+  "bytecodeVersion": 3,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M1 Pro",
+    "command": "cd vm && go test -bench=. -benchmem -benchtime=200ms ./..."
+  },
+  "targets": {
+    "fileManagerListSortMaxStepsPerEntry": 140,
+    "rpcStepBudget": 250000,
+    "rpcDurationBudgetMs": 1500
+  },
+  "benchmarks": {
+    "BenchmarkFib20": {
+      "nsPerOp": 2448244,
+      "bytesPerOp": 15824,
+      "allocsPerOp": 9
+    },
+    "BenchmarkTightLoop10k": {
+      "nsPerOp": 1583921,
+      "bytesPerOp": 12048,
+      "allocsPerOp": 8
+    },
+    "BenchmarkStringBuild": {
+      "nsPerOp": 287471,
+      "bytesPerOp": 542325,
+      "allocsPerOp": 1007
+    },
+    "BenchmarkStringWalk50k": {
+      "nsPerOp": 10668984,
+      "bytesPerOp": 70480,
+      "allocsPerOp": 14
+    },
+    "BenchmarkArrayBuild20k": {
+      "nsPerOp": 11392246,
+      "bytesPerOp": 19844034,
+      "allocsPerOp": 60033
+    },
+    "BenchmarkObjectBuild10k": {
+      "nsPerOp": 6365786,
+      "bytesPerOp": 9349208,
+      "allocsPerOp": 30084
+    },
+    "BenchmarkHandlerDispatch": {
+      "nsPerOp": 202.8,
+      "bytesPerOp": 0,
+      "allocsPerOp": 0
+    },
+    "BenchmarkFileManagerListSort": {
+      "nsPerOp": 526301,
+      "bytesPerOp": 164091,
+      "allocsPerOp": 433,
+      "stepsPerEntry": 133.4
+    }
+  }
+}

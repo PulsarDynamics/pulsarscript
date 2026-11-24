@@ -1,12 +1,8 @@
 package vm
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +10,6 @@ import (
 )
 
 const maxJSONDepth = 64
-
-var isoDateRe = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2}))?$`)
 
 func indexOfRunes(s, sub string, hasStart bool, startNum float64) (int, error) {
 	runes := []rune(s)
@@ -202,110 +196,7 @@ func defaultSortCompare(vm *VM, items []Value) ([]Value, error) {
 }
 
 func parseJSONStrict(vm *VM, text string) (Value, error) {
-	dec := json.NewDecoder(bytes.NewBufferString(text))
-	dec.UseNumber()
-	val, err := readJSONValue(vm, dec, 0)
-	if err != nil {
-		return Value{}, err
-	}
-	if tok, err := dec.Token(); err != io.EOF {
-		if err == nil {
-			return Value{}, vm.runtimeError("jsonParse: unexpected trailing token %v", tok)
-		}
-		return Value{}, vm.runtimeError("jsonParse: %v", err)
-	}
-	return val, nil
-}
-
-func readJSONValue(vm *VM, dec *json.Decoder, depth int) (Value, error) {
-	tok, err := dec.Token()
-	if err != nil {
-		return Value{}, vm.runtimeError("jsonParse: %v", err)
-	}
-	return decodeJSONToken(vm, dec, tok, depth)
-}
-
-func decodeJSONToken(vm *VM, dec *json.Decoder, tok json.Token, depth int) (Value, error) {
-	switch v := tok.(type) {
-	case nil:
-		return Nil(), nil
-	case bool:
-		return Bool(v), nil
-	case json.Number:
-		f, err := strconv.ParseFloat(v.String(), 64)
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-			return Value{}, vm.runtimeError("jsonParse: invalid or non-finite number %q", v.String())
-		}
-		return Number(f), nil
-	case string:
-		if err := vm.checkStringSize(len(v)); err != nil {
-			return Value{}, err
-		}
-		return String(v), nil
-	case json.Delim:
-		if depth+1 > maxJSONDepth {
-			return Value{}, vm.runtimeError("jsonParse: maximum nesting depth %d exceeded", maxJSONDepth)
-		}
-		switch v {
-		case '[':
-			elems := make([]Value, 0)
-			for dec.More() {
-				elem, err := readJSONValue(vm, dec, depth+1)
-				if err != nil {
-					return Value{}, err
-				}
-				if err := vm.checkCollectionSize(len(elems) + 1); err != nil {
-					return Value{}, err
-				}
-				elems = append(elems, elem)
-			}
-			endTok, err := dec.Token()
-			if err != nil || endTok != json.Delim(']') {
-				return Value{}, vm.runtimeError("jsonParse: expected ']'")
-			}
-			if err := vm.accountAlloc(estCollectionHeader+int64(len(elems))*estElementSlot, 1); err != nil {
-				return Value{}, err
-			}
-			return Array(elems), nil
-		case '{':
-			m := make(map[string]Value)
-			for dec.More() {
-				ktok, err := dec.Token()
-				if err != nil {
-					return Value{}, vm.runtimeError("jsonParse: %v", err)
-				}
-				k, ok := ktok.(string)
-				if !ok {
-					return Value{}, vm.runtimeError("jsonParse: object key must be string")
-				}
-				if err := vm.checkStringSize(len(k)); err != nil {
-					return Value{}, err
-				}
-				val, err := readJSONValue(vm, dec, depth+1)
-				if err != nil {
-					return Value{}, err
-				}
-				if _, exists := m[k]; !exists {
-					if err := vm.checkCollectionSize(len(m) + 1); err != nil {
-						return Value{}, err
-					}
-				}
-				m[k] = val
-			}
-			endTok, err := dec.Token()
-			if err != nil || endTok != json.Delim('}') {
-				return Value{}, vm.runtimeError("jsonParse: expected '}'")
-			}
-			if err := vm.accountAlloc(estCollectionHeader+int64(len(m))*estObjectEntry, 1); err != nil {
-				return Value{}, err
-			}
-			return Object(m), nil
-		default:
-			return Value{}, vm.runtimeError("jsonParse: unexpected delimiter %q", v)
-		}
-	default:
-		return Value{}, vm.runtimeError("jsonParse: unexpected token %T", tok)
-	}
+	return parseJSONValue(vm, text)
 }
 
 func stringifyJSONValue(vm *VM, v Value) (string, error) {
@@ -489,46 +380,91 @@ func daysInMonthUTC(year, month int) int {
 	}
 }
 
+func parseASCIIDigits(s string, start, count int) (int, bool) {
+	if start+count > len(s) {
+		return 0, false
+	}
+	v := 0
+	for i := 0; i < count; i++ {
+		c := s[start+i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		v = v*10 + int(c-'0')
+	}
+	return v, true
+}
+
 func parseISODateStrict(s string) Value {
-	m := isoDateRe.FindStringSubmatch(s)
-	if m == nil {
+	if len(s) < 10 || s[4] != '-' || s[7] != '-' {
 		return Nil()
 	}
-	year, _ := strconv.Atoi(m[1])
-	month, _ := strconv.Atoi(m[2])
-	day, _ := strconv.Atoi(m[3])
+	year, okY := parseASCIIDigits(s, 0, 4)
+	month, okM := parseASCIIDigits(s, 5, 2)
+	day, okD := parseASCIIDigits(s, 8, 2)
+	if !okY || !okM || !okD {
+		return Nil()
+	}
 	if month < 1 || month > 12 || day < 1 || day > daysInMonthUTC(year, month) {
 		return Nil()
 	}
 	hour, minute, second, milli := 0, 0, 0, 0
 	offsetMs := int64(0)
-	if m[4] != "" {
-		hour, _ = strconv.Atoi(m[4])
-		minute, _ = strconv.Atoi(m[5])
-		if m[6] != "" {
-			second, _ = strconv.Atoi(m[6])
+	if len(s) > 10 {
+		if s[10] != 'T' || len(s) < 17 || s[13] != ':' {
+			return Nil()
 		}
-		if m[7] != "" {
-			frac := m[7]
-			for len(frac) < 3 {
-				frac += "0"
+		var ok bool
+		hour, ok = parseASCIIDigits(s, 11, 2)
+		if !ok {
+			return Nil()
+		}
+		minute, ok = parseASCIIDigits(s, 14, 2)
+		if !ok {
+			return Nil()
+		}
+		pos := 16
+		if pos < len(s) && s[pos] == ':' {
+			pos++
+			second, ok = parseASCIIDigits(s, pos, 2)
+			if !ok {
+				return Nil()
 			}
-			milli, _ = strconv.Atoi(frac)
+			pos += 2
+			if pos < len(s) && s[pos] == '.' {
+				pos++
+				fracStart := pos
+				for pos < len(s) && s[pos] >= '0' && s[pos] <= '9' && pos-fracStart < 3 {
+					pos++
+				}
+				if pos == fracStart {
+					return Nil()
+				}
+				frac := s[fracStart:pos]
+				for len(frac) < 3 {
+					frac += "0"
+				}
+				milli, _ = strconv.Atoi(frac)
+			}
 		}
 		if hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
 			return Nil()
 		}
-		tz := m[8]
-		if tz != "Z" {
-			tzH, _ := strconv.Atoi(tz[1:3])
-			tzM, _ := strconv.Atoi(tz[4:6])
-			if tzH > 23 || tzM > 59 {
+		tz := s[pos:]
+		if tz == "Z" {
+			// UTC offset 0
+		} else if len(tz) == 6 && (tz[0] == '+' || tz[0] == '-') && tz[3] == ':' {
+			tzH, okH := parseASCIIDigits(tz, 1, 2)
+			tzM, okMin := parseASCIIDigits(tz, 4, 2)
+			if !okH || !okMin || tzH > 23 || tzM > 59 {
 				return Nil()
 			}
 			offsetMs = int64(tzH*60+tzM) * 60_000
 			if tz[0] == '-' {
 				offsetMs = -offsetMs
 			}
+		} else {
+			return Nil()
 		}
 	}
 	t := time.Date(year, time.Month(month), day, hour, minute, second, milli*1_000_000, time.UTC)

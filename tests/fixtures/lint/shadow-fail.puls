@@ -1,0 +1,10 @@
+var value = 10;
+function testShadow(arg) {
+  if (arg > 0) {
+    var value = 20;
+    var arg = 5;
+    return value + arg;
+  }
+  return value;
+}
+print(testShadow(1));

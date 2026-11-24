@@ -1,0 +1,4 @@
+function writeNote(path, text) {
+  return fsWrite(path, text);
+}
+registerHandler("writeNote", writeNote);

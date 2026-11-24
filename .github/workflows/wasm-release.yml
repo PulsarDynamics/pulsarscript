@@ -1,0 +1,132 @@
+name: WASM Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "vm/**"
+      - "scripts/build-wasm.ts"
+      - "wasm/**"
+      - "package.json"
+      - ".github/workflows/wasm-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wasm-release
+  cancel-in-progress: false
+
+jobs:
+  release-wasm:
+    name: Tag & Publish Go VM WebAssembly Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compute next WASM release tag
+        id: version
+        run: |
+          EXISTING=$(git tag --points-at HEAD 'wasm/v*' | head -n1 || true)
+          if [ -n "$EXISTING" ]; then
+            echo "HEAD already tagged with $EXISTING; skipping duplicate release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$EXISTING" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_VER=$(node -p "require('./package.json').version")
+          MAJOR_MINOR="${BASE_VER%.*}"
+          LATEST_TAG=$(git tag -l "wasm/v${MAJOR_MINOR}.*" --sort=-v:refname | head -n1 || true)
+
+          if [ -z "$LATEST_TAG" ] && ! git rev-parse -q --verify "refs/tags/wasm/v${BASE_VER}" >/dev/null 2>&1; then
+            NEXT_TAG="wasm/v${BASE_VER}"
+          else
+            PATCH=0
+            if [ -n "$LATEST_TAG" ]; then
+              PATCH="${LATEST_TAG##*.}"
+            else
+              PATCH="${BASE_VER##*.}"
+            fi
+            NEXT_PATCH=$((PATCH + 1))
+            NEXT_TAG="wasm/v${MAJOR_MINOR}.${NEXT_PATCH}"
+            while git rev-parse -q --verify "refs/tags/${NEXT_TAG}" >/dev/null 2>&1; do
+              NEXT_PATCH=$((NEXT_PATCH + 1))
+              NEXT_TAG="wasm/v${MAJOR_MINOR}.${NEXT_PATCH}"
+            done
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEXT_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved next WASM release tag: ${NEXT_TAG}"
+
+      - name: Build & verify WebAssembly artifacts
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          cd vm && GOOS=js GOARCH=wasm go vet ./cmd/vmwasm
+          cd ..
+          bun run build:wasm
+          bun test tests/unit/wasm.test.ts tests/unit/debugger.test.ts tests/unit/docs-site.test.ts
+
+      - name: Prepare WASM release bundle
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          mkdir -p dist-wasm
+          cp site/pulsarvm.wasm site/pulsarvm.wasm.br site/pulsarvm.wasm.gz site/wasm_exec.js dist-wasm/
+          (cd dist-wasm && sha256sum pulsarvm.wasm pulsarvm.wasm.br pulsarvm.wasm.gz wasm_exec.js > SHA256SUMS.txt)
+
+          RAW_BYTES=$(wc -c < dist-wasm/pulsarvm.wasm | tr -d ' ')
+          GZ_BYTES=$(wc -c < dist-wasm/pulsarvm.wasm.gz | tr -d ' ')
+          BR_BYTES=$(wc -c < dist-wasm/pulsarvm.wasm.br | tr -d ' ')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          cat <<EOF > dist-wasm/RELEASE_NOTES.md
+          ## PulsarScript Go VM WebAssembly \`${{ steps.version.outputs.tag }}\`
+
+          Built from commit \`${SHORT_SHA}\` (\`main\`).
+
+          | Artifact | Size |
+          | --- | --- |
+          | \`pulsarvm.wasm\` (raw) | ${RAW_BYTES} bytes |
+          | \`pulsarvm.wasm.gz\` (gzip -9) | ${GZ_BYTES} bytes |
+          | \`pulsarvm.wasm.br\` (brotli -11) | ${BR_BYTES} bytes |
+          | \`wasm_exec.js\` | Go WASM runtime loader |
+
+          \`\`\`text
+          $(cat dist-wasm/SHA256SUMS.txt)
+          \`\`\`
+          EOF
+
+      - name: Create tag and publish GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release Go VM WebAssembly $TAG"
+          git push origin "refs/tags/$TAG"
+          gh release create "$TAG" \
+            dist-wasm/pulsarvm.wasm \
+            dist-wasm/pulsarvm.wasm.br \
+            dist-wasm/pulsarvm.wasm.gz \
+            dist-wasm/wasm_exec.js \
+            dist-wasm/SHA256SUMS.txt \
+            --title "PulsarScript WASM $TAG" \
+            --notes-file dist-wasm/RELEASE_NOTES.md

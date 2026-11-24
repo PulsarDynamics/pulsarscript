@@ -1,0 +1,15 @@
+{
+  "id": "com.example.legacy",
+  "name": "Legacy Exports",
+  "version": "1.0.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "script": {
+    "bundle": "scripts/app.json",
+    "exports": ["hello"]
+  },
+  "permissions": {
+    "scopes": []
+  }
+}

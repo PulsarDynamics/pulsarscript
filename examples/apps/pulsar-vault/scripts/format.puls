@@ -1,0 +1,305 @@
+// format.puls — String formatting, escapes, nested templates, Markdown task parsing, and UTF-8 Base64 encoding.
+
+export const VAULT_LOCK_ICON = "\u{1F512}";
+export const VAULT_SPARK_ICON = "\u{2728}";
+
+const NEWLINE = "\n";
+const CR = "\r";
+const TAB = "\t";
+const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+export function coalesce(val, fallback) {
+  return val == nil ? fallback : val;
+}
+
+export function asObject(val) {
+  return typeOf(val) == "object" ? val : {};
+}
+
+export function asArray(val) {
+  return typeOf(val) == "array" ? val : [];
+}
+
+export function getProp(obj, key, fallback) {
+  if (typeOf(obj) != "object") {
+    return fallback;
+  }
+  if (!objHas(obj, key)) {
+    return fallback;
+  }
+  var found = objGet(obj, key);
+  return found == nil ? fallback : found;
+}
+
+export function normalizeNewlines(text) {
+  var raw = text == nil ? "" : string(text);
+  return replace(replace(raw, CR + NEWLINE, NEWLINE), CR, NEWLINE);
+}
+
+export function splitWords(text) {
+  var norm = normalizeNewlines(text);
+  var flat = replace(replace(norm, NEWLINE, " "), TAB, " ");
+  var parts = split(flat, " ");
+  return arrayFilter(parts, function(part) {
+    return len(trim(part)) > 0;
+  });
+}
+
+export function countWords(text) {
+  return arrayLen(splitWords(text));
+}
+
+export function readingMinutes(wordCount) {
+  if (wordCount <= 0) {
+    return 1;
+  }
+  return max(1, ceil(wordCount / 180));
+}
+
+export function formatShortDate(ms) {
+  var ts = isFinite(number(ms)) ? number(ms) : clock();
+  return dateFormat(ts, "YYYY-MM-DD HH:mm");
+}
+
+export function slugify(text) {
+  var lower = toLower(trim(text == nil ? "" : string(text)));
+  var out = "";
+  var prevDash = false;
+  var n = len(lower);
+
+  for (var i = 0; i < n; i += 1) {
+    var ch = lower[i];
+    var cp = charCodeAt(lower, i);
+    var isLowerAlpha = cp != nil && cp >= 0x61 && cp <= 0x7a;
+    var isDigit = cp != nil && cp >= 0x30 && cp <= 0x39;
+    if (isLowerAlpha || isDigit) {
+      out += ch;
+      prevDash = false;
+    } else if (ch == " " || ch == "-" || ch == "_" || ch == "/") {
+      if (!prevDash && len(out) > 0) {
+        out += "-";
+        prevDash = true;
+      }
+    }
+  }
+
+  if (endsWith(out, "-")) {
+    out = substr(out, 0, len(out) - 1);
+  }
+  if (len(out) == 0) {
+    return "note";
+  }
+  return len(out) > 48 ? substr(out, 0, 48) : out;
+}
+
+export function parseTasks(body) {
+  var lines = split(normalizeNewlines(body), NEWLINE);
+  var tasks = [];
+
+  for (var i = 0; i < arrayLen(lines); i += 1) {
+    var trimmed = trim(lines[i]);
+    if (startsWith(trimmed, "- [ ] ") || startsWith(trimmed, "- [x] ") || startsWith(trimmed, "- [X] ")) {
+      var done = startsWith(trimmed, "- [x] ") || startsWith(trimmed, "- [X] ");
+      var label = trim(substr(trimmed, 6, len(trimmed) - 6));
+      tasks[arrayLen(tasks)] = {
+        lineIndex: i,
+        done: done,
+        label: label,
+        badge: padStart(string(i + 1), 2, "0")
+      };
+    }
+  }
+  return tasks;
+}
+
+export function toggleTaskInBody(body, targetLine) {
+  var lines = split(normalizeNewlines(body), NEWLINE);
+  if (targetLine < 0 || targetLine >= arrayLen(lines)) {
+    return {
+      ok: false,
+      body: normalizeNewlines(body),
+      toggledDone: nil
+    };
+  }
+
+  var rawLine = lines[targetLine];
+  var indentLen = 0;
+  while (indentLen < len(rawLine) && (rawLine[indentLen] == " " || rawLine[indentLen] == TAB)) {
+    indentLen += 1;
+  }
+  var indent = indentLen > 0 ? substr(rawLine, 0, indentLen) : "";
+  var rest = substr(rawLine, indentLen, len(rawLine) - indentLen);
+
+  var nextDone = nil;
+  if (startsWith(rest, "- [ ] ")) {
+    lines[targetLine] = indent + "- [x] " + substr(rest, 6, len(rest) - 6);
+    nextDone = true;
+  } else if (startsWith(rest, "- [x] ") || startsWith(rest, "- [X] ")) {
+    lines[targetLine] = indent + "- [ ] " + substr(rest, 6, len(rest) - 6);
+    nextDone = false;
+  }
+
+  return {
+    ok: nextDone != nil,
+    body: arrayJoin(lines, NEWLINE),
+    toggledDone: nextDone
+  };
+}
+
+export function extractInlineTags(body) {
+  var norm = normalizeNewlines(body);
+  var tags = [];
+  var pos = 0;
+  var totalLen = len(norm);
+
+  while (pos < totalLen) {
+    var idx = indexOf(norm, "#", pos);
+    if (idx < 0) {
+      break;
+    }
+    var prevOk = idx == 0;
+    if (!prevOk) {
+      var prevCh = norm[idx - 1];
+      prevOk = prevCh == " " || prevCh == NEWLINE || prevCh == TAB;
+    }
+    if (prevOk && idx + 1 < totalLen) {
+      var cursor = idx + 1;
+      var tag = "";
+      while (cursor < totalLen) {
+        var c = norm[cursor];
+        var cp = charCodeAt(norm, cursor);
+        var validChar = cp != nil && (
+          (cp >= 0x61 && cp <= 0x7a) ||
+          (cp >= 0x41 && cp <= 0x5a) ||
+          (cp >= 0x30 && cp <= 0x39) ||
+          c == "-" ||
+          c == "_"
+        );
+        if (!validChar) {
+          break;
+        }
+        tag += toLower(c);
+        cursor += 1;
+      }
+      if (len(tag) >= 2 && !arrayIncludes(tags, tag)) {
+        tags[arrayLen(tags)] = tag;
+      }
+      pos = cursor;
+    } else {
+      pos = idx + 1;
+    }
+  }
+  return tags;
+}
+
+export function stripMarkdownLine(text) {
+  var norm = trim(replace(normalizeNewlines(text), NEWLINE, " "));
+  var clean = replace(replace(norm, "\"", "\\\""), TAB, " ");
+  var lastDot = lastIndexOf(clean, ".", len(clean));
+  if (len(clean) > 110) {
+    var prefix = substr(clean, 0, 107);
+    if (lastDot > 40 && lastDot < 107) {
+      return substr(clean, 0, lastDot + 1);
+    }
+    return prefix + "...";
+  }
+  return clean;
+}
+
+export function renderDigestMarkdown(notes, meta) {
+  var page = getProp(meta, "page", 1);
+  var totalPages = getProp(meta, "totalPages", 1);
+  var totalNotes = getProp(meta, "totalNotes", arrayLen(notes));
+  var exportedAt = getProp(meta, "exportedAt", formatShortDate(clock()));
+  var divider = repeat("-", 44);
+
+  var header = `# ${VAULT_LOCK_ICON} Pulsar Vault Digest
+${`Page ${page} of ${totalPages} \u{2022} ${totalNotes} indexed items \u{2022} ${exportedAt}`}
+${divider}`;
+
+  var sections = [header];
+  for (var i = 0; i < arrayLen(notes); i += 1) {
+    var note = notes[i];
+    var title = getProp(note, "title", "Untitled");
+    var kind = toUpper(string(getProp(note, "kind", "note")));
+    var folder = getProp(note, "folder", "inbox");
+    var updated = formatShortDate(getProp(note, "updatedAt", clock()));
+    var rawTags = asArray(getProp(note, "tags", []));
+    var tagLine = arrayLen(rawTags) > 0
+      ? arrayJoin(arrayMap(rawTags, function(t) { return "#" + t; }), " ")
+      : "(untagged)";
+    var kindCell = padEnd(kind, 8, " ");
+    var numBadge = padStart(string(i + 1), 2, "0");
+    var body = normalizeNewlines(getProp(note, "body", ""));
+
+    var section = `
+## ${numBadge}. ${title}
+> Kind: \`${kindCell}\` \u{2502} Folder: \`${folder}\` \u{2502} Updated: \`${updated}\`
+> Tags: ${tagLine}
+
+${body}`;
+    sections[arrayLen(sections)] = section;
+    if (getProp(meta, "cooperativeYield", false) == true && i % 3 == 2) {
+      yield();
+    }
+  }
+
+  return arrayJoin(sections, NEWLINE + divider + NEWLINE) + NEWLINE;
+}
+
+function appendUtf8Bytes(bytes, cp) {
+  if (cp < 0x80) {
+    bytes[arrayLen(bytes)] = cp;
+  } else if (cp < 0x800) {
+    bytes[arrayLen(bytes)] = 0xc0 + floor(cp / 64);
+    bytes[arrayLen(bytes)] = 0x80 + (cp % 64);
+  } else if (cp < 0x10000) {
+    bytes[arrayLen(bytes)] = 0xe0 + floor(cp / 4096);
+    bytes[arrayLen(bytes)] = 0x80 + (floor(cp / 64) % 64);
+    bytes[arrayLen(bytes)] = 0x80 + (cp % 64);
+  } else {
+    bytes[arrayLen(bytes)] = 0xf0 + floor(cp / 262144);
+    bytes[arrayLen(bytes)] = 0x80 + (floor(cp / 4096) % 64);
+    bytes[arrayLen(bytes)] = 0x80 + (floor(cp / 64) % 64);
+    bytes[arrayLen(bytes)] = 0x80 + (cp % 64);
+  }
+  return bytes;
+}
+
+export function encodeUtf8Base64(text) {
+  var raw = text == nil ? "" : string(text);
+  var total = len(raw);
+  if (total == 0) {
+    return "";
+  }
+
+  var bytes = [];
+  for (var i = 0; i < total; i += 1) {
+    var cp = charCodeAt(raw, i);
+    if (cp != nil) {
+      bytes = appendUtf8Bytes(bytes, cp);
+    }
+  }
+
+  var out = [];
+  var bLen = arrayLen(bytes);
+  for (var idx = 0; idx < bLen; idx += 3) {
+    var has1 = idx + 1 < bLen;
+    var has2 = idx + 2 < bLen;
+    var b0 = bytes[idx];
+    var b1 = has1 ? bytes[idx + 1] : 0;
+    var b2 = has2 ? bytes[idx + 2] : 0;
+    var combined = b0 * 65536 + b1 * 256 + b2;
+
+    var i0 = floor(combined / 262144) % 64;
+    var i1 = floor(combined / 4096) % 64;
+    var i2 = floor(combined / 64) % 64;
+    var i3 = combined % 64;
+
+    out[arrayLen(out)] = B64_ALPHABET[i0];
+    out[arrayLen(out)] = B64_ALPHABET[i1];
+    out[arrayLen(out)] = has1 ? B64_ALPHABET[i2] : "=";
+    out[arrayLen(out)] = has2 ? B64_ALPHABET[i3] : "=";
+  }
+  return arrayJoin(out, "");
+}

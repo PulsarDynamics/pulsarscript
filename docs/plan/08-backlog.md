@@ -65,7 +65,7 @@ Five more items are listed under *Later* and are not in the total.
 | OPS-07 | Staging environment and deploy pipeline on the chosen platform; secrets store; database and user-file backups with one restore drill | new | API, frontend | 2 | OPS-06 | A merge to the default branch reaches staging without manual steps; a restore from backup is rehearsed once |
 | OPS-08 | Observability baseline: structured logs with request IDs, counters for auth failures, budget and memory kills, VM count, and error reporting | new | API | 1 | | A failed login, a killed script and a 500 are each visible in the logs with one request ID |
 | QA-01 | `-race` in API CI; coverage uploaded with a ratchet that cannot go down | Analysis rec. 10 | API | 0.25 | | CI fails on a data race and on a coverage drop |
-| LANG-02 | Fuzz `LoadModule`, `VerifyModule` and run-with-budget; nightly CI job | Phase 6, Analysis rec. 5 | PulsarScript | 1 | LANG-01 | One hour of fuzzing: no panic, no budget or memory escape |
+| LANG-02 | Fuzz `LoadModule`, `VerifyModule` and run-with-budget; nightly CI job *(Done in pulsarscript: `vm/fuzz_test.go`, PR 5s CI + `.github/workflows/nightly.yml`)* | Phase 6, Analysis rec. 5 | PulsarScript | 1 | LANG-01 | One hour of fuzzing: no panic, no budget or memory escape |
 | REL-01 | Remove tracked generated files and clutter in both PulsarOS repos; archive root-level planning files; fix `.gitmodules` and `CLAUDE.md`; drop unused dependencies and dead code | L2, L20–L23 | API, frontend | 1 | | Repo roots hold only code, config and current docs |
 
 ## G3 — App platform proven in a real browser (16 d)
@@ -75,7 +75,7 @@ Five more items are listed under *Later* and are not in the total.
 | QA-02 | Playwright against a live API in CI (Chromium and Firefox): sign in, install File Manager Lite, run its M6 scenario, update, uninstall; sandbox assertions | N4, Plan M6, Phase 4 | Frontend, API | 3 | APP-01 | The job is required on PRs to pulsaros and pulsaros-api |
 | APP-02 | App UI origin isolation: serve UIs from a dedicated origin and pin window navigation to it; revoke the app's port on navigation | N3 | API, frontend | 2.5 | QA-02 | A Playwright test shows an app that sets `location.href` to another site is blocked or stopped before it receives data |
 | APP-03 | SDK version contract: the SDK announces its version in `app.ready`; the host negotiates; `fruit build` stamps it into the manifest; validation warns on stale copies | Analysis (contracts), new | Frontend, API | 1 | APP-01 | A bundle with an unsupported SDK major is refused with a readable message |
-| APP-04 | Contract checks in CI: `hostapi.json` against the API script host for every entry; manifest schema fixtures shared by all three repos | Analysis (contracts) | All | 0.5 | APP-01 | Adding a host call to the registry without a host implementation fails API CI |
+| APP-04 | Contract checks in CI: `hostapi.json` against the API script host for every entry; manifest schema fixtures shared by all three repos *(PulsarScript half Done: `contracts/app_manifest.schema.json`, `contracts/fixtures/manifest/`, `tests/unit/contracts.test.ts`, `vm/contract_test.go`; API/Frontend checks in sibling repos)* | Analysis (contracts) | All | 0.5 | APP-01 | Adding a host call to the registry without a host implementation fails API CI |
 | FE-01 | Bug reports through a server endpoint; delete the `VITE_PB_ADMIN_*` path; make the report host configurable | H6 | Frontend, API | 1 | | The built bundle contains no PocketBase admin variable names |
 | FE-02 | Remove the third-party frame check in Web Browser, or serve it from the API | M14 | Frontend | 0.5 | | No request leaves for `ifc.izaak-kuipers.workers.dev` |
 | FE-03 | Write user CSS through `textContent` instead of `{@html}` | F4 | Frontend | 0.5 | | `</style><img onerror>` in user CSS renders no element |
@@ -95,7 +95,7 @@ Five more items are listed under *Later* and are not in the total.
 | LANG-06 | Compile errors for unreachable code, duplicate declarations and wrong arity; column numbers; stack in runtime errors | Phase 2, Analysis | PulsarScript | 1.5 | | Each error kind has a conformance case with line and column |
 | LANG-17 | Copy-on-write (CoW) collection updates preserving D15 value semantics so array appends and object key writes scale linearly instead of copying the whole value | N5, A23, split from LANG-07 | PulsarScript | 2 | LANG-01 | 20,000 appends and 10,000 object key sets run inside RPC time/step budgets; aliasing conformance cases pass on both runtimes |
 | LANG-18 | String comparison (`<`, `<=`, `>`, `>=` by code point), nested non-variable index targets (`o.items[len(o.items)] = i`), and pragmatic v1.0 syntax (`/* */`, `?:`, `1e3`/`0x`, `parseFloat`/`number` parity; `++`/`switch`/`do…while` excluded) | N6, A22 | PulsarScript | 2 | APP-01 | Conformance cases on both runtimes cover string sorting comparisons, nested append, ternary, block comments and exponent/hex literals |
-| LANG-08 | `SPEC.md` v1.0; at least 280 conformance cases; loader tests with stored v0, v1 and v2 bundles; benchmark baseline recorded | Phase 2 exit | PulsarScript | 2 | LANG-03, LANG-04, LANG-05, LANG-06, LANG-17, LANG-18 | Phase 2 exit criteria met in CI; `v1.0.0` tagged |
+| LANG-08 | `SPEC.md` v1.0; at least 280 conformance cases; loader tests with stored v0, v1 and v2 bundles; benchmark baseline recorded *(Done: 285 conformance cases, `SPEC.md` v1.0, `vm/compat_test.go`, `docs/benchmarks-baseline.json`)* | Phase 2 exit | PulsarScript | 2 | LANG-03, LANG-04, LANG-05, LANG-06, LANG-17, LANG-18 | Phase 2 exit criteria met in CI; `v1.0.0` tagged |
 
 ## G5 — Runtime, standard library and file grants (20 d)
 
@@ -113,12 +113,12 @@ Five more items are listed under *Later* and are not in the total.
 
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
-| DX-01 | Formatter (`fruit fmt`) | Phase 5 | PulsarScript | 2 | LANG-08 | Formatting the conformance suite is idempotent and changes no output |
-| DX-02 | Linter: unused variables, shadowing, unknown host calls, host call without its capability in the manifest | Phase 5 | PulsarScript | 2 | LANG-08 | Each rule has a failing and a passing fixture |
-| DX-03 | Language server (diagnostics, completion, hover from `hostapi.json`) and a VS Code extension | Phase 5 | PulsarScript | 4 | DX-02 | Completion lists the 60+ registry functions with types |
-| DX-04 | Go VM built to WebAssembly; Script Studio app with output, disassembly and budget meters | Phase 5, A1 | PulsarScript, frontend | 4 | LANG-08 | A script runs in the browser with the same output as `vmrun` for the whole conformance suite |
-| DX-05 | Debugger in Script Studio: breakpoints and stepping on line maps | Phase 5 | PulsarScript, frontend | 2 | DX-04 | Stop at a line, inspect locals, step over a call |
-| DX-06 | Docs site generated from `SPEC.md`, the registry and conformance examples; refreshed first-app guide and SDK reference | Phase 5 | PulsarScript, API | 1 | | A developer new to PulsarOS writes, tests and debugs a handler from the docs alone |
+| DX-01 | Formatter (`bun run fmt` / `fruit fmt`) *(Done in pulsarscript: `tools/formatter.ts`, `fmt.ts`, `tests/unit/formatter.test.ts`)* | Phase 5 | PulsarScript | 2 | LANG-08 | Formatting the conformance suite is idempotent and changes no output |
+| DX-02 | Linter: unused variables, shadowing, unknown host calls, host call without its capability in the manifest *(Done in pulsarscript: `tools/linter.ts`, `lint.ts`, `tests/unit/linter.test.ts`)* | Phase 5 | PulsarScript | 2 | LANG-08 | Each rule has a failing and a passing fixture |
+| DX-03 | Language server (diagnostics, completion, hover from `hostapi.json`) and a VS Code extension *(Done: `lsp/`, `editors/vscode/`, `tests/unit/lsp.test.ts`)* | Phase 5 | PulsarScript | 4 | DX-02 | Completion lists the 60+ registry functions with types |
+| DX-04 | Go VM built to WebAssembly; Script Studio app with output, disassembly and budget meters *(Done: `vm/cmd/vmwasm`, `wasm/pulsar-wasm.ts`, `site/pulsarvm.wasm`, lazy Script Studio WASM integration, 285/285 WASM conformance)* | Phase 5, A1 | PulsarScript, frontend | 4 | LANG-08 | A script runs in the browser with the same output as `vmrun` for the whole conformance suite |
+| DX-05 | Debugger in Script Studio: breakpoints and stepping on line maps *(Done: `vm/debugger.go`, `vmrun -debug`, WASM debugger APIs, Script Studio Debugger tab, `tests/unit/debugger.test.ts`)* | Phase 5 | PulsarScript, frontend | 2 | DX-04 | Stop at a line, inspect locals, step over a call |
+| DX-06 | Docs site generated from `SPEC.md`, the registry and conformance examples; refreshed first-app guide and SDK reference *(Done in pulsarscript: `docs/first-app-guide.md`, `site/docs.html`, `site/docs-data.js`, `tests/unit/docs-site.test.ts`)* | Phase 5 | PulsarScript, API | 1 | | A developer new to PulsarOS writes, tests and debugs a handler from the docs alone |
 | DX-07 | Local mock-host `fruit dev` workbench (sandboxed iframe, theme/scope toggles, `appfs` fake tree, in-process Go VM with budgets, live reload) and `.pulsar` `fruit create` templates (`update-fruit-dev-workbench`, movable after G3) | N8, A26 | API | 3 | APP-01 | `fruit create my-app --template starter && cd my-app && fruit build` succeeds; `fruit dev` runs `ui/` + `.puls` handlers locally with live reload |
 
 ## G7 — Hardening and performance (8.75 d)
@@ -126,7 +126,7 @@ Five more items are listed under *Later* and are not in the total.
 | ID | Item | Source | Repo | Days | Depends on | Acceptance test |
 | --- | --- | --- | --- | --- | --- | --- |
 | LANG-07 | Performance: constant folding, peephole passes, fewer `Value` copies in the VM loop, faster string indexing (`L25`), building on `LANG-17` CoW | Phase 6, Analysis | PulsarScript | 2 | LANG-08 | Benchmarks beat the G4 baseline; File Manager Lite uses fewer steps per folder entry than today's 140 |
-| LANG-14 | Fuzz the parser and compiler nightly | Phase 6 | PulsarScript | 1 | LANG-02 | No crash in a nightly run |
+| LANG-14 | Fuzz the parser and compiler nightly *(Done: `scripts/fuzz-compiler.ts`, `.github/workflows/nightly.yml`)* | Phase 6 | PulsarScript | 1 | LANG-02 | No crash in a nightly run |
 | SEC-14 | Security review of the host layer: capabilities, `fs*` path handling, IPC scope, resource caps | Phase 6 | API | 2 | LANG-11 | Every finding is fixed or recorded with a decision |
 | APP-06 | Per-app quotas (CPU time per minute, VM count, key-value size) and telemetry dashboards | Phase 6 | API | 2 | OPS-08 | An app over quota is throttled and the event is visible on a dashboard |
 | LANG-15 | Compatibility policy: bytecode versions N and N−1; deprecation process for host calls | Phase 6 | PulsarScript | 0.5 | | The policy is in `SPEC.md` and enforced by a loader test |

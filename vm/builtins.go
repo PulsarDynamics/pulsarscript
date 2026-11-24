@@ -3,7 +3,6 @@ package vm
 import (
 	"math"
 	"math/rand"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +16,6 @@ type builtinFunc func(vm *VM, args []Value) (Value, error)
 // coreBuiltins holds one implementation per "core" entry in hostapi.json (SPEC §8); a test
 // checks the two match. They mirror the TypeScript interpreter's natives.
 var coreBuiltins map[string]builtinFunc
-
-var floatLiteralRe = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`)
 
 func init() {
 	num := func(f func(float64) float64) builtinFunc {
@@ -293,7 +290,7 @@ func init() {
 				return a[0], nil
 			}
 			s := strings.TrimSpace(a[0].str)
-			if !floatLiteralRe.MatchString(s) {
+			if !isDecimalLiteral(s, false) {
 				return Nil(), nil
 			}
 			f, err := strconv.ParseFloat(s, 64)
@@ -728,7 +725,7 @@ func toNumber(v Value) Value {
 		}
 		return Number(0)
 	case kindString:
-		if numberLiteralRe.MatchString(v.str) {
+		if isDecimalLiteral(v.str, true) {
 			if f, err := strconv.ParseFloat(strings.TrimSpace(v.str), 64); err == nil {
 				return Number(f)
 			}

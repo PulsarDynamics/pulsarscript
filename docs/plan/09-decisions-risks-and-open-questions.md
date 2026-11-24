@@ -8,7 +8,7 @@ Eleven architecture decisions were already approved and nine of them are built. 
 
 | ID | Decision | Status on 23 Nov 2026 | What is left |
 | --- | --- | --- | --- |
-| A1 | The Go VM is the canonical runtime; the browser REPL and playground run it as WebAssembly | Approved, not built | DX-04 builds it; LANG-16 retires the TypeScript interpreter afterwards |
+| A1 | The Go VM is the canonical runtime; the browser REPL and playground run it as WebAssembly | Implemented (`vm/cmd/vmwasm`, `site/pulsarvm.wasm`, Script Studio in `DX-04`) | `LANG-16` retires the TypeScript interpreter after one release (*Later*) |
 | A2 | A written spec plus a conformance suite | Implemented: SPEC v0.4 and 122 cases on `main`; v0.5 and 159 in #18 | SPEC v1.0 at G4 |
 | A3 | One host-API registry | Implemented as `hostapi.json` (the plan text said `.yaml`): 53 functions on `main`, 60 in #18 | Standard library entries (LANG-09) |
 | A4 | Capabilities per host call | Approved; built in pulsaros-api#53, in review | Host-layer review (SEC-14) |

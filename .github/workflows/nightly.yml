@@ -1,0 +1,81 @@
+name: Nightly Fuzz & Benchmarks
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_time:
+        description: "Go fuzzer duration (e.g. 60m or 10s)"
+        required: false
+        default: "60m"
+      compiler_iterations:
+        description: "Parser/compiler fuzz iterations"
+        required: false
+        default: "100000"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-vm:
+    name: Fuzz Go VM loader and execution (LANG-02)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
+
+      - name: Fuzz LoadModule, VerifyModule, and Run
+        run: go test -fuzz=FuzzLoadModuleAndRun -fuzztime=${{ inputs.fuzz_time || '60m' }}
+
+  fuzz-compiler:
+    name: Fuzz Lexer, Parser, Analyzer, and Compiler (LANG-14)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run compiler fuzzer
+        run: bun run scripts/fuzz-compiler.ts --iterations ${{ inputs.compiler_iterations || '100000' }}
+
+  benchmarks:
+    name: Go VM Benchmarks (LANG-08 / LANG-07)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install root TypeScript compiler dependencies
+        working-directory: .
+        run: bun install --frozen-lockfile
+
+      - name: Run Go VM benchmarks
+        run: go test -bench=. -benchmem -count=3 ./... | tee bench.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-benchmarks
+          path: vm/bench.txt

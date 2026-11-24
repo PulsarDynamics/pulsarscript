@@ -31,14 +31,23 @@ with `docs/plan/README.md`. This repo's work is in `docs/plan/03-pulsarscript-la
 
 ```bash
 bun install --frozen-lockfile
-bun run typecheck          # tsc --noEmit
-bun test                   # TypeScript unit tests
-bun run conformance -- --require-vm   # conformance suite on both runtimes
+bun run typecheck                           # tsc --noEmit (root + VS Code ext via editors/vscode/tsconfig.json)
+bun run build:wasm                          # build site/pulsarvm.wasm + site/wasm_exec.js (DX-04)
+bun run gen:site                            # generate site/site-data.js, site/docs-data.js, site/pulsar-runtime.js (DX-06)
+bun test                                    # TypeScript unit, contracts, formatter, linter, LSP, debugger, WASM & docs tests
+bun run conformance -- --require-vm --require-wasm   # conformance suite across interp, Go VM, and WASM VM
+bun run fmt -- --check <files...>           # PulsarScript formatter (DX-01)
+bun run lint <files...>                     # PulsarScript linter + AppManifest scope checks (DX-02)
+bun run lsp                                 # PulsarScript Language Server over stdio (DX-03)
+bun run fuzz:compiler -- --iterations 5000  # Lexer/Parser/Semantic/BytecodeCompiler fuzzer (LANG-14)
 
 cd vm
-gofmt -l .                 # must print nothing
+gofmt -l .                                  # must print nothing
 go vet ./...
+GOOS=js GOARCH=wasm go vet ./cmd/vmwasm
 go test -race ./...
+go test -fuzz=FuzzLoadModuleAndRun -fuzztime=5s .
+go run ./cmd/vmrun -debug <bundle.json>     # Interactive breakpoint & step debugger (DX-05)
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above on every PR.
+CI (`.github/workflows/ci.yml`) runs PR checks, `.github/workflows/nightly.yml` runs nightly compiler + Go VM fuzzing and benchmarks, and `.github/workflows/wasm-release.yml` automatically tags (`wasm/vX.Y.Z`) and publishes pre-built WASM assets as GitHub Releases when WASM-impacting files land on `main`. Generated docs live at `site/docs.html` (source tutorial: `docs/first-app-guide.md`).

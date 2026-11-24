@@ -3,9 +3,11 @@ import type { ExprVisitor } from "../interfaces/ExprVisitor";
 
 export class ArrayExpr implements Expr {
     elements: Expr[];
+    endLine?: number;
 
-    constructor(elements: Expr[]) {
+    constructor(elements: Expr[], endLine?: number) {
         this.elements = elements;
+        if (endLine !== undefined) this.endLine = endLine;
     }
 
     accept<R>(visitor: ExprVisitor<R>): R {

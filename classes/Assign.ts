@@ -5,10 +5,14 @@ import type { Token } from "../interfaces/Token";
 export class Assign implements Expr {
     name: Token;
     value: Expr;
+    compoundOp?: string;
+    compoundRhs?: Expr;
   
-    constructor(name: Token, value: Expr) {
+    constructor(name: Token, value: Expr, compoundOp?: string, compoundRhs?: Expr) {
       this.name = name;
       this.value = value;
+      if (compoundOp !== undefined) this.compoundOp = compoundOp;
+      if (compoundRhs !== undefined) this.compoundRhs = compoundRhs;
     }
   
     accept<R>(visitor: ExprVisitor<R>): R {

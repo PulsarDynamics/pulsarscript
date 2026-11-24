@@ -2,7 +2,6 @@ package vm
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -46,16 +45,69 @@ const (
 var hostAPI = mustLoadHostAPI(hostAPIJSON)
 
 func mustLoadHostAPI(data []byte) map[string]*HostFunction {
-	var reg struct {
-		Version   int            `json:"version"`
-		Functions []HostFunction `json:"functions"`
-	}
-	if err := json.Unmarshal(data, &reg); err != nil {
+	parsed, err := ParseJSON(data)
+	if err != nil {
 		panic(fmt.Sprintf("pulsarscriptvm: invalid hostapi.json: %v", err))
 	}
-	out := make(map[string]*HostFunction, len(reg.Functions))
-	for i := range reg.Functions {
-		fn := &reg.Functions[i]
+	root, ok := parsed.(map[string]any)
+	if !ok {
+		panic("pulsarscriptvm: invalid hostapi.json: root must be object")
+	}
+	rawFns, ok := root["functions"].([]any)
+	if !ok {
+		panic("pulsarscriptvm: invalid hostapi.json: missing functions array")
+	}
+	out := make(map[string]*HostFunction, len(rawFns))
+	for _, entry := range rawFns {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			panic("pulsarscriptvm: invalid hostapi.json: function entry must be object")
+		}
+		fn := &HostFunction{}
+		if v, ok := m["name"].(string); ok {
+			fn.Name = v
+		}
+		if v, ok := m["provider"].(string); ok {
+			fn.Provider = v
+		}
+		if v, ok := m["capability"].(string); ok {
+			fn.Capability = v
+		}
+		if v, ok := m["deprecated"].(string); ok {
+			fn.Deprecated = v
+		}
+		if v, ok := m["returns"].(string); ok {
+			fn.Returns = v
+		}
+		if v, ok := m["doc"].(string); ok {
+			fn.Doc = v
+		}
+		if rawParams, ok := m["params"].([]any); ok {
+			fn.Params = make([]HostParam, len(rawParams))
+			for j, pe := range rawParams {
+				pm, ok := pe.(map[string]any)
+				if !ok {
+					continue
+				}
+				var param HostParam
+				if v, ok := pm["name"].(string); ok {
+					param.Name = v
+				}
+				if v, ok := pm["type"].(string); ok {
+					param.Type = v
+				}
+				if v, ok := pm["optional"].(bool); ok {
+					param.Optional = v
+				}
+				if v, ok := pm["variadic"].(bool); ok {
+					param.Variadic = v
+				}
+				if v, ok := pm["min"].(float64); ok {
+					param.Min = int(v)
+				}
+				fn.Params[j] = param
+			}
+		}
 		if fn.Provider != ProviderCore && fn.Provider != ProviderHost {
 			panic(fmt.Sprintf("pulsarscriptvm: hostapi.json: %s has unknown provider %q", fn.Name, fn.Provider))
 		}

@@ -19,13 +19,15 @@
 // @xfail case now passes: remove the directive). Known failures (XFAIL) do not fail.
 //
 // Usage:
-//   bun tests/conformance/run.ts [--vmrun <path>] [--require-vm] [--runtime interp|vm]
-//                                [--filter <substring>] [--json <report.json>] [--verbose]
+//   bun tests/conformance/run.ts [--vmrun <path>] [--require-vm] [--require-wasm]
+//                                [--runtime interp|vm|wasm] [--filter <substring>]
+//                                [--json <report.json>] [--verbose]
 
-import { readdirSync, statSync, mkdirSync, existsSync } from "node:fs";
-import { join, relative, dirname, basename } from "node:path";
+import { readdirSync, statSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
+import { loadPulsarWasmVM, type PulsarWasmClient } from "../../wasm/pulsar-wasm";
 
-type Runtime = "interp" | "vm";
+type Runtime = "interp" | "vm" | "wasm";
 type Status = "pass" | "fail" | "xfail" | "xpass" | "skip";
 
 interface Directive {
@@ -53,7 +55,8 @@ const ROOT = dirname(new URL(import.meta.url).pathname);
 const REPO = join(ROOT, "..", "..");
 const OUT = join(ROOT, ".out");
 const TIMEOUT_MS = 5000;
-const ALL: Runtime[] = ["interp", "vm"];
+const ALL: Runtime[] = ["interp", "vm", "wasm"];
+const WASM_PATH = join(REPO, "site", "pulsarvm.wasm");
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(name);
@@ -78,6 +81,8 @@ function buildVmrun(): string | undefined {
 
 const vmrun = opt("--vmrun") ?? process.env.PULSARSCRIPT_VMRUN ?? (flag("--no-build") ? undefined : buildVmrun());
 const requireVm = flag("--require-vm");
+const requireWasm = flag("--require-wasm");
+const withWasm = flag("--with-wasm") || requireWasm || opt("--runtime") === "wasm" || existsSync(WASM_PATH);
 const onlyRuntime = opt("--runtime") as Runtime | undefined;
 const filter = opt("--filter");
 const jsonOut = opt("--json");
@@ -85,6 +90,10 @@ const verbose = flag("--verbose");
 
 if (requireVm && (!vmrun || !existsSync(vmrun))) {
   console.error("--require-vm given but no vmrun binary: install Go (vm/ is built automatically) or set PULSARSCRIPT_VMRUN / --vmrun.");
+  process.exit(2);
+}
+if (requireWasm && !existsSync(WASM_PATH)) {
+  console.error(`--require-wasm given but ${WASM_PATH} does not exist. Run: bun run build:wasm`);
   process.exit(2);
 }
 
@@ -102,7 +111,7 @@ function findCases(dir: string): string[] {
 function parseRuntimes(s: string): Runtime[] {
   if (s === "all") return [...ALL];
   return s.split(",").map((r) => {
-    if (r !== "interp" && r !== "vm") throw new Error(`unknown runtime '${r}'`);
+    if (r !== "interp" && r !== "vm" && r !== "wasm") throw new Error(`unknown runtime '${r}'`);
     return r;
   });
 }
@@ -161,7 +170,11 @@ async function runInterp(c: Case): Promise<string[]> {
   return out;
 }
 
-async function runVm(c: Case): Promise<string[]> {
+const compiledCache = new Map<string, { ok: true; bc: string } | { ok: false; errLines: string[] }>();
+
+async function compileCase(c: Case): Promise<{ ok: true; bc: string } | { ok: false; errLines: string[] }> {
+  const cached = compiledCache.get(c.file);
+  if (cached) return cached;
   mkdirSync(OUT, { recursive: true });
   const bc = join(OUT, c.name.replace(/[\/\\]/g, "__") + ".json");
   const comp = await run(["bun", join(REPO, "compile.ts"), "-s", c.file, bc]);
@@ -169,9 +182,19 @@ async function runVm(c: Case): Promise<string[]> {
     const err = comp.stderr + comp.stdout;
     const kind = /Parse Error/i.test(err) ? "parse" : /Semantic Error/i.test(err) ? "semantic" : comp.timedOut ? "timeout" : "compile";
     const msg = lines(err).filter((l) => l.trim()).find((l) => !/^\s*(\d+\s*\||\^)/.test(l)) ?? "";
-    return [`!error: ${kind}: ${msg.trim()}`];
+    const fail = { ok: false as const, errLines: [`!error: ${kind}: ${msg.trim()}`] };
+    compiledCache.set(c.file, fail);
+    return fail;
   }
-  const r = await run([vmrun!, bc]);
+  const ok = { ok: true as const, bc };
+  compiledCache.set(c.file, ok);
+  return ok;
+}
+
+async function runVm(c: Case): Promise<string[]> {
+  const compiled = await compileCase(c);
+  if (!compiled.ok) return compiled.errLines;
+  const r = await run([vmrun!, compiled.bc]);
   const out: string[] = [];
   for (const l of lines(r.stdout + (r.stderr ? "\n" + r.stderr : ""))) {
     if (l === "Execution completed successfully." || l === "") continue;
@@ -183,15 +206,47 @@ async function runVm(c: Case): Promise<string[]> {
   return out;
 }
 
+let wasmClientPromise: Promise<PulsarWasmClient> | null = null;
+async function runWasm(c: Case): Promise<string[]> {
+  const compiled = await compileCase(c);
+  if (!compiled.ok) return compiled.errLines;
+  if (!wasmClientPromise) wasmClientPromise = loadPulsarWasmVM(WASM_PATH);
+  const client = await wasmClientPromise;
+  const bcJson = readFileSync(compiled.bc, "utf8");
+  const res = await Promise.race([
+    client.runBytecode(bcJson, { mockHost: false, autoResumeYield: true }),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS)),
+  ]);
+  if (!res) return ["!error: timeout"];
+  const out: string[] = [];
+  for (const p of res.prints ?? []) {
+    for (const l of p.replace(/\r/g, "").split("\n")) {
+      out.push(l);
+    }
+  }
+  if (!res.ok) {
+    out.push(`!error: runtime: ${res.error ?? "unknown error"}`);
+  }
+  return out;
+}
+
 function matches(expected: string[], actual: string[]): boolean {
   if (expected.length !== actual.length) return false;
   return expected.every((e, i) => (e.startsWith("!error") ? actual[i].startsWith(e) : e === actual[i]));
 }
 
 const files = findCases(ROOT).filter((f) => !filter || f.includes(filter));
-const runtimes = ALL.filter((r) => (!onlyRuntime || r === onlyRuntime) && (r !== "vm" || (vmrun && existsSync(vmrun))));
+const runtimes = ALL.filter((r) => {
+  if (onlyRuntime && r !== onlyRuntime) return false;
+  if (r === "vm") return Boolean(vmrun && existsSync(vmrun));
+  if (r === "wasm") return Boolean(withWasm && existsSync(WASM_PATH));
+  return true;
+});
 if (!runtimes.includes("vm") && (!onlyRuntime || onlyRuntime === "vm")) {
   console.log("note: vm runtime skipped (no vmrun binary; set PULSARSCRIPT_VMRUN or --vmrun)\n");
+}
+if (!runtimes.includes("wasm") && (!onlyRuntime || onlyRuntime === "wasm")) {
+  console.log("note: wasm runtime skipped (site/pulsarvm.wasm not built; run bun run build:wasm)\n");
 }
 
 const results: Result[] = [];
@@ -202,7 +257,7 @@ for (const file of files) {
       results.push({ case: c.name, runtime: rt, status: "skip" });
       continue;
     }
-    const actual = rt === "interp" ? await runInterp(c) : await runVm(c);
+    const actual = rt === "interp" ? await runInterp(c) : rt === "vm" ? await runVm(c) : await runWasm(c);
     const ok = matches(c.expected, actual);
     const xf = c.xfail.find((d) => d.runtimes.includes(rt));
     const status: Status = ok ? (xf ? "xpass" : "pass") : xf ? "xfail" : "fail";

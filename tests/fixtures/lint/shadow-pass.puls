@@ -1,0 +1,6 @@
+var outerCount = 1;
+function compute(step) {
+  var nextVal = outerCount + step;
+  return nextVal;
+}
+print(compute(2));
