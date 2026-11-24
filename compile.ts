@@ -14,6 +14,7 @@ const args = process.argv.slice(2);
 const flags = {
   check: false,
   emitSourcemap: false,
+  debug: false,
   help: false,
 };
 const positionalArgs: string[] = [];
@@ -22,6 +23,9 @@ for (const arg of args) {
   if (arg === "--check" || arg === "-c") {
     flags.check = true;
   } else if (arg === "--emit-sourcemap" || arg === "-s") {
+    flags.emitSourcemap = true;
+  } else if (arg === "--debug" || arg === "-g") {
+    flags.debug = true;
     flags.emitSourcemap = true;
   } else if (arg === "--help" || arg === "-h") {
     flags.help = true;
@@ -38,6 +42,7 @@ Usage: bun run compile.ts [options] <input.puls> [output.json]
 Options:
   --check, -c          Check syntax and semantics only, don't emit bytecode
   --emit-sourcemap, -s Include line mapping in output
+  --debug, -g          Include line map and local variable names for debugger
   --help, -h           Show this help message
 
 Examples:
@@ -84,7 +89,7 @@ try {
   }
 
   // Compile to bytecode
-  const chunk = BytecodeCompiler.compile(stmts, sources);
+  const chunk = BytecodeCompiler.compile(stmts, sources, { debug: flags.debug });
 
   // Optionally strip sourcemap for smaller output
   if (!flags.emitSourcemap) {

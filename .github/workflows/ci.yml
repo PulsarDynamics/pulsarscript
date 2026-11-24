@@ -14,10 +14,14 @@ concurrency:
 
 jobs:
   checks:
-    name: Typecheck and unit tests (TypeScript)
+    name: Typecheck, VS Code ext, WASM assets, and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vm/go.mod
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -26,14 +30,21 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bun run typecheck
+      - name: Build Go VM WebAssembly & generate site docs
+        run: |
+          bun run build:wasm
+          bun run gen:site
 
-      - name: Unit tests, golden bytecode, SPEC table
+      - name: Typecheck
+        run: |
+          bun run typecheck
+          bun x tsc --noEmit -p editors/vscode/tsconfig.json
+
+      - name: Unit tests, golden bytecode, SPEC table, contracts, tooling & docs
         run: bun test
 
   vm:
-    name: Go VM (fmt, vet, tests)
+    name: Go VM (fmt, vet, WASM vet, tests, 5s fuzz)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -48,14 +59,19 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l . | tee /dev/stderr)"
 
-      - name: go vet
-        run: go vet ./...
+      - name: go vet (native & js/wasm)
+        run: |
+          go vet ./...
+          GOOS=js GOARCH=wasm go vet ./cmd/vmwasm
 
       - name: go test
         run: go test -race ./...
 
+      - name: Go VM PR fuzz smoke check (LANG-02)
+        run: go test -fuzz=FuzzLoadModuleAndRun -fuzztime=5s .
+
   conformance:
-    name: Conformance (interpreter + Go VM)
+    name: Conformance (interpreter + Go VM + WASM VM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,9 +87,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The runner builds vm/cmd/vmrun from this checkout (decision A7): no other repository needed.
+      - name: Build Go VM WebAssembly
+        run: bun run build:wasm
+
+      # The runner builds vm/cmd/vmrun from this checkout (decision A7) and exercises the WASM VM (DX-04).
       - name: Conformance
-        run: bun run conformance -- --require-vm --json conformance.json
+        run: bun run conformance -- --require-vm --require-wasm --json conformance.json
 
       - name: Upload conformance report
         if: always()

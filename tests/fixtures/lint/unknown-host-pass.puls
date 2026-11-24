@@ -1,0 +1,2 @@
+var items = arraySort(["b", "a"]);
+print(jsonStringify(items));

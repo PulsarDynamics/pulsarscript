@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulsaros.dev/schemas/app_manifest.schema.json",
+  "title": "PulsarOS AppManifest",
+  "description": "Manifest schema for PulsarOS .pulsar application bundles (v1, SPEC §9 & APP-04).",
+  "type": "object",
+  "required": ["id", "name", "version", "ui", "permissions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)+$",
+      "minLength": 3,
+      "maxLength": 128,
+      "description": "Reverse-DNS or dotted lowercase application identifier."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+      "description": "Semantic version (MAJOR.MINOR.PATCH)."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "icon": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sdkVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+      "description": "Target PulsarOS App SDK version stamped by fruit build (APP-03)."
+    },
+    "ui": {
+      "type": "object",
+      "required": ["entry"],
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.).+$"
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width": { "type": "integer", "minimum": 160, "maximum": 4096 },
+            "height": { "type": "integer", "minimum": 120, "maximum": 4096 },
+            "minWidth": { "type": "integer", "minimum": 120, "maximum": 4096 },
+            "minHeight": { "type": "integer", "minimum": 100, "maximum": 4096 },
+            "resizable": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "script": {
+      "type": "object",
+      "required": ["bundle", "handlers"],
+      "additionalProperties": false,
+      "properties": {
+        "bundle": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.).+$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.).+$"
+        },
+        "handlers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "mode"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["rpc", "service"]
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["scopes"],
+      "additionalProperties": false,
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["fs.read", "fs.write", "fs.user", "kv", "events", "window", "ipc"]
+          }
+        }
+      }
+    },
+    "fileTypes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["extensions"],
+        "additionalProperties": false,
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^\\.[a-z0-9]+$"
+            }
+          },
+          "mimeTypes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 3 }
+          },
+          "role": {
+            "type": "string",
+            "enum": ["viewer", "editor"]
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -61,22 +61,28 @@ export class Parser {
 
     // Statements and primary expressions record their source line for the compiler's line
     // map, so runtime errors point at the right line on the VM (D18).
-    private withLine<T>(line: number, node: T): T {
-        const n = node as { line?: number };
+    private withLine<T>(line: number, node: T, startOffset?: number): T {
+        const n = node as { line?: number; startOffset?: number; endOffset?: number; endLine?: number };
         if (n.line === undefined) n.line = line;
+        if (startOffset !== undefined && n.startOffset === undefined) n.startOffset = startOffset;
+        const endTok = this.tokens[Math.max(0, this.current - 1)];
+        if (endTok && n.endOffset === undefined && endTok.endOffset !== undefined) n.endOffset = endTok.endOffset;
+        if (endTok && n.endLine === undefined) n.endLine = endTok.endLine ?? endTok.line;
         return node;
     }
 
     private declaration(): Stmt {
-        const line = this.peek().line;
+        const start = this.peek();
+        const line = start.line;
+        const startOff = start.startOffset;
         try {
-            if (this.match(TokenType.IMPORT)) return this.withLine(line, this.importDeclaration(this.previous()));
-            if (this.match(TokenType.EXPORT)) return this.withLine(line, this.exportDeclaration(this.previous()));
-            if (this.match(TokenType.VAR)) return this.withLine(line, this.varDeclaration());
-            if (this.match(TokenType.CONST)) return this.withLine(line, this.varDeclaration(true));
+            if (this.match(TokenType.IMPORT)) return this.withLine(line, this.importDeclaration(this.previous()), startOff);
+            if (this.match(TokenType.EXPORT)) return this.withLine(line, this.exportDeclaration(this.previous()), startOff);
+            if (this.match(TokenType.VAR)) return this.withLine(line, this.varDeclaration(), startOff);
+            if (this.match(TokenType.CONST)) return this.withLine(line, this.varDeclaration(true), startOff);
             if (this.check(TokenType.FUNCTION) && this.peekAt(1).type === TokenType.IDENTIFIER) {
                 this.advance();
-                return this.withLine(line, this.function("function"));
+                return this.withLine(line, this.function("function"), startOff);
             }
             return this.statement();
         } catch (error) {
@@ -184,12 +190,12 @@ export class Parser {
 
         this.consume(TokenType.LEFT_BRACE, `Expect '{' before ${kind} body.`);
         const body = this.block();
-        return new FunctionStmt(name, parameters, body);
+        return new FunctionStmt(name, parameters, body, this.previous().line, this.previous().endOffset);
     }
 
     private statement(): Stmt {
-        const line = this.peek().line;
-        return this.withLine(line, this.statementWithoutLine());
+        const start = this.peek();
+        return this.withLine(start.line, this.statementWithoutLine(), start.startOffset);
     }
 
     private statementWithoutLine(): Stmt {
@@ -197,7 +203,10 @@ export class Parser {
         if (this.match(TokenType.IF)) return this.ifStatement();
         if (this.match(TokenType.WHILE)) return this.whileStatement();
         if (this.match(TokenType.FOR)) return this.forStatement();
-        if (this.match(TokenType.LEFT_BRACE)) return new BlockStmt(this.block());
+        if (this.match(TokenType.LEFT_BRACE)) {
+            const stmts = this.block();
+            return new BlockStmt(stmts, this.previous().line, this.previous().endOffset);
+        }
         if (this.match(TokenType.RETURN)) return this.returnStatement();
         if (this.match(TokenType.TRY)) return this.tryCatchStatement();
         if (this.match(TokenType.BREAK, TokenType.CONTINUE)) {
@@ -291,20 +300,36 @@ export class Parser {
     private tryCatchStatement(): Stmt {
         this.consume(TokenType.LEFT_BRACE, "Expect '{' after 'try'.");
         const tryBlock = this.block();
+        const tryEndLine = this.previous().line;
+        const tryEndOffset = this.previous().endOffset;
         let catchParam: string | null = null;
+        let catchParamToken: Token | undefined;
         let catchBlock: Stmt[] = [];
+        let catchLine: number | undefined;
+        let endLine: number | undefined;
+        let endOffset: number | undefined;
         if (this.match(TokenType.CATCH)) {
+            catchLine = this.previous().line;
             if (this.match(TokenType.LEFT_PAREN)) {
                 const ident = this.consume(TokenType.IDENTIFIER, "Expect identifier after 'catch('.");
                 catchParam = ident.lexeme;
+                catchParamToken = ident;
                 this.consume(TokenType.RIGHT_PAREN, "Expect ')' after catch parameter.");
             }
             this.consume(TokenType.LEFT_BRACE, "Expect '{' to start catch block.");
             catchBlock = this.block();
+            endLine = this.previous().line;
+            endOffset = this.previous().endOffset;
         } else {
             this.error(this.peek(), "Expect 'catch' after try block.");
         }
-        return new TryCatchStmt(tryBlock, catchParam, catchBlock);
+        const node = new TryCatchStmt(tryBlock, catchParam, catchBlock, catchParamToken);
+        node.tryEndLine = tryEndLine;
+        node.tryEndOffset = tryEndOffset;
+        node.catchLine = catchLine;
+        node.endLine = endLine;
+        node.endOffset = endOffset;
+        return node;
     }
 
     private returnStatement(): Stmt {
@@ -349,6 +374,7 @@ export class Parser {
 
             if (expr instanceof Variable) {
                 let value = rawValue;
+                let compoundOp: string | undefined;
                 if (equals.type !== TokenType.EQUAL) {
                     const opType = {
                         [TokenType.PLUS_EQUAL]: TokenType.PLUS,
@@ -359,8 +385,9 @@ export class Parser {
                     }[equals.type as string] as TokenType;
                     const operator: Token = { ...equals, type: opType, lexeme: equals.lexeme.slice(0, -1) };
                     value = new Binary(expr, operator, rawValue);
+                    compoundOp = equals.lexeme;
                 }
-                return new Assign(expr.name, value);
+                return new Assign(expr.name, value, compoundOp, compoundOp ? rawValue : undefined);
             }
             if (expr instanceof IndexExpr) {
                 let operator: Token | null = null;
@@ -528,21 +555,22 @@ export class Parser {
         if (this.match(TokenType.NIL)) return new Literal(null);
 
         if (this.match(TokenType.NUMBER, TokenType.STRING, TokenType.TEMPLATE_STRING)) {
-            return new Literal(this.previous().literal);
+            const prev = this.previous();
+            return new Literal(prev.literal, prev.lexeme, prev.type === TokenType.TEMPLATE_STRING);
         }
 
         if (this.match(TokenType.TEMPLATE_HEAD)) {
             const head = this.previous();
-            const parts: Expr[] = [this.withLine(head.line, new Literal(head.literal))];
+            const parts: Expr[] = [this.withLine(head.line, new Literal(head.literal, head.lexeme, true))];
             while (true) {
                 parts.push(this.expression());
                 if (this.match(TokenType.TEMPLATE_MIDDLE)) {
                     const mid = this.previous();
-                    parts.push(this.withLine(mid.line, new Literal(mid.literal)));
+                    parts.push(this.withLine(mid.line, new Literal(mid.literal, mid.lexeme, true)));
                     continue;
                 }
                 const tail = this.consume(TokenType.TEMPLATE_TAIL, "Expect '}' after template expression.");
-                parts.push(this.withLine(tail.line, new Literal(tail.literal)));
+                parts.push(this.withLine(tail.line, new Literal(tail.literal, tail.lexeme, true)));
                 break;
             }
             return new TemplateLiteralExpr(parts, head);
@@ -564,7 +592,7 @@ export class Parser {
             this.consume(TokenType.RIGHT_PAREN, "Expect ')' after parameters.");
             this.consume(TokenType.LEFT_BRACE, "Expect '{' before function body.");
             const body = this.block();
-            return new FunctionExpr(keyword, name, parameters, body);
+            return new FunctionExpr(keyword, name, parameters, body, this.previous().line, this.previous().endOffset);
         }
 
         if (this.match(TokenType.IDENTIFIER)) {
@@ -586,7 +614,7 @@ export class Parser {
                 } while (this.match(TokenType.COMMA));
             }
             this.consume(TokenType.RIGHT_BRACKET, "Expect ']' after array elements.");
-            return new ArrayExpr(elements);
+            return new ArrayExpr(elements, this.previous().line);
         }
 
         // Object literal: {key: value, key2: value2, ...}
@@ -596,20 +624,25 @@ export class Parser {
                 do {
                     // Key must be an identifier or string
                     let key: string;
+                    let keyToken: Token;
+                    let quoted = false;
                     if (this.match(TokenType.IDENTIFIER)) {
-                        key = this.previous().lexeme;
+                        keyToken = this.previous();
+                        key = keyToken.lexeme;
                     } else if (this.match(TokenType.STRING)) {
-                        key = this.previous().literal as string;
+                        keyToken = this.previous();
+                        key = keyToken.literal as string;
+                        quoted = true;
                     } else {
                         throw this.error(this.peek(), "Expect property name.");
                     }
                     this.consume(TokenType.COLON, "Expect ':' after property name.");
                     const value = this.expression();
-                    properties.push({ key, value });
+                    properties.push({ key, value, keyToken, quoted });
                 } while (this.match(TokenType.COMMA));
             }
             this.consume(TokenType.RIGHT_BRACE, "Expect '}' after object properties.");
-            return new ObjectExpr(properties);
+            return new ObjectExpr(properties, this.previous().line);
         }
 
         throw this.error(this.peek(), "Expect expression.");

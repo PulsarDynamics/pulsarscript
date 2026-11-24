@@ -1,0 +1,100 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PulsarScript",
+  "scopeName": "source.pulsarscript",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#templates" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.pulsarscript",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.pulsarscript",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.pulsarscript",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.pulsarscript",
+          "match": "\\\\([ntr\\\\\"]|u\\{[0-9A-Fa-f]{1,6}\\})"
+        }
+      ]
+    },
+    "templates": {
+      "name": "string.template.pulsarscript",
+      "begin": "`",
+      "end": "`",
+      "patterns": [
+        {
+          "name": "constant.character.escape.pulsarscript",
+          "match": "\\\\([ntr\\\\\"`$]|u\\{[0-9A-Fa-f]{1,6}\\})"
+        },
+        {
+          "name": "meta.template.expression.pulsarscript",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "patterns": [
+            { "include": "$self" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.pulsarscript",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.pulsarscript",
+          "match": "\\b(?:\\d+\\.\\d+|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.pulsarscript",
+          "match": "\\b(if|else|while|for|of|break|continue|return|try|catch|import|export|from|as)\\b"
+        },
+        {
+          "name": "storage.type.pulsarscript",
+          "match": "\\b(var|const|function)\\b"
+        },
+        {
+          "name": "keyword.other.print.pulsarscript",
+          "match": "\\bprint\\b"
+        }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.pulsarscript",
+      "match": "\\b(true|false|nil)\\b"
+    },
+    "builtins": {
+      "name": "support.function.builtin.pulsarscript",
+      "match": "\\b(typeOf|string|number|concat|len|abs|floor|ceil|round|sqrt|pow|min|max|clamp|isInteger|isFinite|sin|cos|tan|atan2|log|log10|exp|mathPi|mathE|toUpper|toLower|trim|indexOf|lastIndexOf|split|replace|startsWith|endsWith|repeat|padStart|padEnd|charCodeAt|fromCharCode|substr|parseInt|parseFloat|toNumberOr|clock|dateFormat|dateParse|random|randomInt|randomSeed|arrayLen|arrayPush|arrayPop|arraySlice|arrayConcat|arrayIndexOf|arrayJoin|arrayIncludes|arrayMap|arrayFilter|arrayReduce|arrayFind|arraySort|objKeys|objValues|objHas|objGet|objSet|objDelete|objEntries|objMerge|jsonParse|jsonStringify|registerHandler|on|emit|sleep|yield|kvGet|kvSet|kvDelete|fsRead|fsList|fsStat|fsExists|fsWrite|fsDelete|fsMkdir|fsRename|fsCopy|fsQuota|fsReadBase64|fsWriteBase64|emitEvent|pollEvent|notifyWindow|ipcSetContext|ipcSend)\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.pulsarscript",
+      "match": "(\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\||[+\\-*/%=<>!?:])"
+    }
+  }
+}

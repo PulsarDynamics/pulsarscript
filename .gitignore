@@ -125,3 +125,8 @@ examples/*.json
 tokens.json
 statements.json
 tests/conformance/.out/
+dist-wasm/
+site/pulsarvm.wasm
+site/pulsarvm.wasm.br
+site/pulsarvm.wasm.gz
+site/wasm_exec.js

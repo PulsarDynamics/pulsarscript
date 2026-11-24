@@ -72,6 +72,7 @@ export interface FunctionEntry {
   locals: number;
   upvalues?: UpvalueDesc[];
   selfSlot?: number;
+  localNames?: string[];
 }
 
 export interface Chunk {

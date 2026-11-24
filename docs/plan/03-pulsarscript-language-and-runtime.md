@@ -9,12 +9,12 @@ PulsarScript now includes bounded memory limits, fuzzed bytecode/parser gates, *
 | | On `main` (SPEC v0.4) | After #18 (SPEC v0.5) | Completed (`v1.2.0` / SPEC v1.0) |
 | --- | --- | --- | --- |
 | Bytecode | version 1, 42 opcodes | version 2, 48 opcodes; v0–2 loaded | version 3, 52 opcodes (`CLOSURE`–`CLOSE_UPVALUE`, `sources`/`fileMap`); v0–3 loaded & tested |
-| Registry (`vm/hostapi.json`) | 53 functions | 60 functions, 20 capability-gated | 99 functions (`LANG-09` stdlib + `on`/`emit`/`sleep`/`yield` + `deprecated` metadata) |
-| Conformance cases | 122 | 159 | **285 cases**, passing 285/285 on both `interp` and `vm` |
-| Benchmarks (Go VM) | — | 20k appends 2.2s, 10k keys 2.9s, 20k char walk cap | **20k appends 11.2 ms**, **10k keys 6.5 ms**, **51k Unicode char walk 10.8 ms**, `listSorted(200)` **133.4 steps/entry** (< 140) |
+| Registry (`vm/hostapi.json`) | 53 functions | 60 functions, 20 capability-gated | **97 functions** (77 `core`, 20 `host` across 6 capabilities; `deprecated` metadata supported) |
+| Conformance cases | 122 | 159 | **285 cases**, passing 285/285 across `interp`, `vm`, and `wasm` |
+| Benchmarks (Go VM) | — | 20k appends 2.2s, 10k keys 2.9s, 20k char walk cap | **20k appends 11.2 ms**, **10k keys 6.5 ms**, **51k Unicode char walk 10.8 ms**, `listSorted(200)` **133.4 steps/entry** (< 140); baseline saved in `docs/benchmarks-baseline.json` |
 | Language | basic control flow & values | indexing, `%`, `break`/`continue`, `for…of`, `const`, fn values | escapes, templates, closures, CoW collections, string ordering, `/* */`, `?:`, `0x`/`1e3`, full stdlib, events, async suspend/resume, build-time `import`/`export` modules |
 
-All 19 audited defects are resolved and all seven original architecture decisions are approved. A4 (capabilities per host call) is implemented in pulsaros-api#53. A1 (the Go VM as the only runtime, built to WebAssembly for the browser) is the one with no code yet; DX-04 delivers it.
+All 19 audited defects are resolved and all seven original architecture decisions are implemented (`A4` capabilities in `pulsaros-api#53`; `A1` WebAssembly Go VM & Script Studio built in `DX-04`; `LANG-16` interpreter retirement waits in *Later*).
 
 **Limits today:** 10 million steps and 10 s per run by default, 250,000 steps and 1.5 s per RPC call in the API, stack depth 1,024, call depth 256. Nothing limits memory (N1). Probe measurements on `main` (`7619cb9`) also recorded two accepted runtime bounds (**L25**): walking a string character by character caps near ~20,000 characters per RPC call (mitigated by windowing, `LANG-09` string ops and `LANG-07`), and recursion stops at 256 calls deep (by design, D10).
 

@@ -10,6 +10,7 @@ const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".wasm": "application/wasm",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".woff2": "font/woff2",
@@ -34,9 +35,38 @@ const server = Bun.serve({
     }
 
     const mime = MIME_TYPES[extname(absPath)] ?? "application/octet-stream";
+    const acceptEncoding = req.headers.get("accept-encoding") ?? "";
+    if (/\bbr\b/i.test(acceptEncoding)) {
+      const brFile = Bun.file(`${absPath}.br`);
+      if (await brFile.exists()) {
+        return new Response(brFile, {
+          headers: {
+            "Content-Type": mime,
+            "Content-Encoding": "br",
+            "Vary": "Accept-Encoding",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+    }
+    if (/\bgzip\b/i.test(acceptEncoding)) {
+      const gzFile = Bun.file(`${absPath}.gz`);
+      if (await gzFile.exists()) {
+        return new Response(gzFile, {
+          headers: {
+            "Content-Type": mime,
+            "Content-Encoding": "gzip",
+            "Vary": "Accept-Encoding",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+    }
+
     return new Response(file, {
       headers: {
         "Content-Type": mime,
+        "Vary": "Accept-Encoding",
         "Cache-Control": "no-store",
       },
     });

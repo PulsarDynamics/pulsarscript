@@ -2,12 +2,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 var (
 	disasm      = flag.Bool("disasm", false, "Print bytecode disassembly and exit")
 	step        = flag.Bool("step", false, "Step-by-step execution with prompts")
+	debugFlag   = flag.Bool("debug", false, "Interactive source-level breakpoint debugger")
 	inspect     = flag.Bool("inspect", false, "Run to handler registration then list handlers")
 	sandboxRoot = flag.String("sandbox-root", "", "Root directory for filesystem operations")
 	maxStack    = flag.Int("max-stack", 1024, "Maximum stack depth")
@@ -110,6 +113,12 @@ func main() {
 		for _, h := range handlers {
 			fmt.Printf("  - %s (address: %d, arity: %d)\n", h.Name, h.Address, h.Arity)
 		}
+		return
+	}
+
+	// Debugger mode
+	if *debugFlag {
+		runDebugMode(vm)
 		return
 	}
 
@@ -242,6 +251,86 @@ func runStepMode(vm *pulsarscriptvm.VM, mod pulsarscriptvm.Module) {
 		if vm.Halted() {
 			fmt.Println("VM halted")
 			break
+		}
+	}
+}
+
+// runDebugMode runs an interactive line-level breakpoint debugger (DX-05).
+func runDebugMode(vm *pulsarscriptvm.VM) {
+	dbg := pulsarscriptvm.NewDebugger(vm)
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("PulsarScript Debugger: b <line>, d <line>, bl, c, n (over), s (in), o (out), si, locals, globals, bt, q")
+	snap := dbg.Snapshot("paused")
+	for {
+		fmt.Printf("[%s] line %d (%s @ %04d) > ", snap.Reason, snap.Line, snap.Opcode, snap.IP)
+		raw, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		parts := strings.Fields(strings.TrimSpace(raw))
+		if len(parts) == 0 {
+			snap = dbg.StepOver()
+			continue
+		}
+		switch parts[0] {
+		case "q", "quit":
+			return
+		case "b", "break":
+			if len(parts) < 2 {
+				fmt.Println("usage: b <line>")
+				continue
+			}
+			ln, err := strconv.Atoi(parts[1])
+			if err != nil {
+				fmt.Println("invalid line number")
+				continue
+			}
+			dbg.AddBreakpoint("", ln)
+			fmt.Printf("Breakpoint set at line %d\n", ln)
+		case "d", "delete":
+			if len(parts) >= 2 {
+				if ln, err := strconv.Atoi(parts[1]); err == nil {
+					dbg.RemoveBreakpoint("", ln)
+				}
+			}
+		case "bl":
+			for _, bp := range dbg.Breakpoints() {
+				fmt.Printf("  %s:%d\n", bp.File, bp.Line)
+			}
+		case "c", "continue":
+			snap = dbg.Continue()
+		case "n", "next":
+			snap = dbg.StepOver()
+		case "s", "step":
+			snap = dbg.StepIn()
+		case "o", "out":
+			snap = dbg.StepOut()
+		case "si":
+			snap = dbg.StepInstruction()
+		case "locals":
+			if len(snap.Frames) > 0 {
+				for _, l := range snap.Frames[0].Locals {
+					fmt.Printf("  %s (%s) = %s\n", l.Name, l.Type, l.Value)
+				}
+			}
+		case "globals":
+			for _, g := range snap.Globals {
+				fmt.Printf("  %s (%s) = %s\n", g.Name, g.Type, g.Value)
+			}
+		case "bt":
+			for _, f := range snap.Frames {
+				fmt.Printf("  #%d %s (%s:%d @ %04d)\n", f.Index, f.Name, f.File, f.Line, f.IP)
+			}
+		default:
+			fmt.Println("Unknown command. Try: b, d, bl, c, n, s, o, si, locals, globals, bt, q")
+		}
+		if snap.Error != "" {
+			fmt.Printf("Error: %s\n", snap.Error)
+			return
+		}
+		if snap.Halted {
+			fmt.Println("Program halted.")
+			return
 		}
 	}
 }

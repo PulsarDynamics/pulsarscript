@@ -9,13 +9,19 @@ export class FunctionExpr implements Expr {
   params: Token[];
   body: Stmt[];
   line?: number;
+  endLine?: number;
+  startOffset?: number;
+  endOffset?: number;
 
-  constructor(keyword: Token, name: Token | null, params: Token[], body: Stmt[]) {
+  constructor(keyword: Token, name: Token | null, params: Token[], body: Stmt[], endLine?: number, endOffset?: number) {
     this.keyword = keyword;
     this.name = name;
     this.params = params;
     this.body = body;
     this.line = keyword.line;
+    this.startOffset = keyword.startOffset;
+    if (endLine !== undefined) this.endLine = endLine;
+    if (endOffset !== undefined) this.endOffset = endOffset;
   }
 
   accept<R>(visitor: ExprVisitor<R>): R {

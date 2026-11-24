@@ -1,0 +1,9 @@
+var used = 42;
+function greet(name, _ignored) {
+  return "Hi " + name;
+}
+function rpcEntry() {
+  return greet("Pulsar", used);
+}
+registerHandler("entry", "rpcEntry");
+export const PUBLIC_VAL = used;

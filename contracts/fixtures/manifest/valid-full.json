@@ -1,0 +1,38 @@
+{
+  "id": "com.pulsaros.file-manager-lite",
+  "name": "File Manager Lite",
+  "version": "1.0.1",
+  "description": "Manage app files with PulsarScript RPC handlers.",
+  "author": "PulsarOS",
+  "icon": "icon.svg",
+  "sdkVersion": "1.0.0",
+  "ui": {
+    "entry": "ui/index.html",
+    "window": {
+      "width": 960,
+      "height": 640,
+      "minWidth": 520,
+      "minHeight": 380,
+      "resizable": true
+    }
+  },
+  "script": {
+    "bundle": "scripts/main.json",
+    "source": "scripts/main.puls",
+    "handlers": [
+      {
+        "name": "listSorted",
+        "mode": "rpc",
+        "description": "List and sort entries in a directory"
+      },
+      {
+        "name": "watchChanges",
+        "mode": "service",
+        "description": "Emit change summaries"
+      }
+    ]
+  },
+  "permissions": {
+    "scopes": ["fs.read", "fs.write", "kv", "events", "window"]
+  }
+}

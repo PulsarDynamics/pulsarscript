@@ -1,6 +1,6 @@
 # PulsarOS Development Plan — 06 · Developer Tooling and Docs
 
-23 Nov 2026 · Prepared for Berk Ormanlı · Status: proposed
+23 Nov 2026 · Prepared for Berk Ormanlı · Status: `DX-01`–`DX-06` implemented in `pulsarscript`; `DX-07` scoped to `pulsaros-api`
 
 Today a PulsarScript developer has a compiler, a REPL, `vmrun` and a first-app guide, and nothing in the editor or the OS that helps while writing — and app UI authors have no local mock host or `.pulsar` template. Gate G6 (18 days, Phase 5 of the Development Plan plus `DX-07`) adds a formatter, a linter, a language server, an in-OS Script Studio on a WebAssembly build of the VM, a debugger, generated docs, and a local mock-host `fruit dev` workbench (`DX-07`, movable right after G3). It ends when a developer new to PulsarOS writes, tests and debugs a handler from the docs alone. IDs refer to Doc 08.
 

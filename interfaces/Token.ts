@@ -6,4 +6,8 @@ export interface Token {
     literal: any;
     line: number;
     column?: number;
+    endLine?: number;
+    endColumn?: number;
+    startOffset?: number;
+    endOffset?: number;
 }

@@ -1,0 +1,11 @@
+{
+  "id": "com.example.badver",
+  "name": "Bad Version",
+  "version": "v1.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "permissions": {
+    "scopes": []
+  }
+}

@@ -3,7 +3,7 @@ import { Lexer } from "../Lexer";
 import { Parser, ParseError } from "../Parser";
 import { SemanticAnalyzer, SemanticError } from "../SemanticAnalyzer";
 import { BytecodeCompiler } from "../BytecodeCompiler";
-import { Opcode, type Chunk } from "../Bytecode";
+import { Opcode, withHeader, type Chunk } from "../Bytecode";
 import {
   BudgetError,
   Interpreter,
@@ -16,6 +16,9 @@ import type { FileEntry, IOBridge } from "../interfaces/IO";
 import { ImportStmt } from "../classes/ImportStmt";
 import { ExportStmt } from "../classes/ExportStmt";
 import { stringify } from "../Values";
+import { formatPulsarScript } from "../tools/formatter";
+import { lintPulsarScript, type LintDiagnostic } from "../tools/linter";
+import pkg from "../package.json";
 
 export interface SandboxCapabilities {
   "fs.read"?: boolean;
@@ -458,8 +461,157 @@ export function compileAndRun(source: string, opts: RunOptions = {}): RunResult 
   }
 }
 
+export interface WasmCompileResult {
+  ok: boolean;
+  stage: "ok" | "parse" | "semantic";
+  bytecodeJson: string | null;
+  disassembly: string;
+  error: string | null;
+  errorLine: number | null;
+  stats: {
+    opcodes: number;
+    constants: number;
+    functions: number;
+  };
+}
+
+export interface FormatSourceResult {
+  ok: boolean;
+  formatted: string;
+  changed: boolean;
+  error: string | null;
+}
+
+export interface LintSourceResult {
+  ok: boolean;
+  diagnostics: LintDiagnostic[];
+  errors: number;
+  warnings: number;
+}
+
+export function compileForWasm(source: string): WasmCompileResult {
+  const reporter = new ErrorReporter(source);
+  try {
+    const tokens = new Lexer(source).scanTokens();
+    const stmts = new Parser(tokens).parse();
+
+    if (stmts.some((s) => s instanceof ImportStmt || s instanceof ExportStmt)) {
+      return {
+        ok: false,
+        stage: "semantic",
+        bytecodeJson: null,
+        disassembly: "",
+        error:
+          "Browser sandbox compiles single-file snippets. Multi-file import/export linking runs via `bun run compile.ts` (shown in the pre-linked Modules & RPC preset).",
+        errorLine: null,
+        stats: { opcodes: 0, constants: 0, functions: 0 },
+      };
+    }
+
+    const analyzer = new SemanticAnalyzer();
+    analyzer.analyze(stmts);
+
+    const chunk = BytecodeCompiler.compile(stmts, ["sandbox.puls"], { debug: true });
+    const filePayload = withHeader(chunk, source, pkg.version);
+    return {
+      ok: true,
+      stage: "ok",
+      bytecodeJson: JSON.stringify(filePayload),
+      disassembly: disassembleChunk(chunk),
+      error: null,
+      errorLine: null,
+      stats: {
+        opcodes: chunk.code.length,
+        constants: chunk.constants.length,
+        functions: (chunk.functions ?? []).length,
+      },
+    };
+  } catch (err: unknown) {
+    let stage: WasmCompileResult["stage"] = "semantic";
+    let msg = err instanceof Error ? err.message : String(err);
+    let errorLine: number | null = null;
+    if (err instanceof ParseError) {
+      stage = "parse";
+      errorLine = err.token?.line ?? null;
+      msg = reporter.formatError(err.token, err.message, "Parse").trim();
+    } else if (err instanceof SemanticError) {
+      stage = "semantic";
+      errorLine = err.token?.line ?? null;
+      msg = reporter.formatError(err.token, err.message, "Semantic").trim();
+    }
+    return {
+      ok: false,
+      stage,
+      bytecodeJson: null,
+      disassembly: "",
+      error: msg,
+      errorLine,
+      stats: { opcodes: 0, constants: 0, functions: 0 },
+    };
+  }
+}
+
+export function formatSource(source: string): FormatSourceResult {
+  try {
+    const formatted = formatPulsarScript(source);
+    return {
+      ok: true,
+      formatted,
+      changed: formatted !== source,
+      error: null,
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      formatted: source,
+      changed: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export function lintSource(
+  source: string,
+  capabilities?: Record<string, boolean>,
+): LintSourceResult {
+  const scopes: string[] = [];
+  if (capabilities) {
+    for (const [scope, enabled] of Object.entries(capabilities)) {
+      if (enabled) scopes.push(scope);
+    }
+  } else {
+    scopes.push("fs.read", "fs.write", "kv", "events");
+  }
+  const diagnostics = lintPulsarScript(source, {
+    filePath: "sandbox.puls",
+    manifest: {
+      permissions: {
+        scopes,
+      },
+    },
+  });
+  return {
+    ok: diagnostics.every((d) => d.severity !== "error"),
+    diagnostics,
+    errors: diagnostics.filter((d) => d.severity === "error").length,
+    warnings: diagnostics.filter((d) => d.severity === "warning").length,
+  };
+}
+
 void stringify;
 
-(globalThis as unknown as { PulsarRuntime: { compileAndRun: typeof compileAndRun } }).PulsarRuntime = {
+(
+  globalThis as unknown as {
+    PulsarRuntime: {
+      compileAndRun: typeof compileAndRun;
+      compileForWasm: typeof compileForWasm;
+      formatSource: typeof formatSource;
+      lintSource: typeof lintSource;
+    };
+  }
+).PulsarRuntime = {
   compileAndRun,
+  compileForWasm,
+  formatSource,
+  lintSource,
 };

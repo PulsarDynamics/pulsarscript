@@ -1,0 +1,11 @@
+{
+  "id": "com.example.hello",
+  "name": "Hello Pulsar",
+  "version": "1.0.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "permissions": {
+    "scopes": []
+  }
+}

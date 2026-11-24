@@ -1,0 +1,20 @@
+{
+  "id": "com.example.badmode",
+  "name": "Bad Handler Mode",
+  "version": "1.0.0",
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "script": {
+    "bundle": "scripts/app.json",
+    "handlers": [
+      {
+        "name": "run",
+        "mode": "daemon"
+      }
+    ]
+  },
+  "permissions": {
+    "scopes": []
+  }
+}
